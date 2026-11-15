@@ -1,0 +1,1124 @@
+openapi: 3.0.3
+info:
+  title: Cassis API
+  version: 1.0.0
+  description: |
+    API för ärenden, handlingar, relationer, användare och värdelistor.
+    Ange en Bearer-token från inloggningen för skyddade anrop.
+    Roller och rättigheter beskrivs i backendens README.
+    JSON-innehåll större än 100 kB avvisas med status 413.
+servers:
+  - url: http://localhost:3000/api
+    description: Lokal utveckling
+security:
+  - bearerAuth: []
+tags:
+  - name: System
+  - name: Autentisering
+  - name: Användare
+  - name: Ärenden
+  - name: Handlingar
+  - name: Relationer
+  - name: Värdelistor
+  - name: Sök
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Kontrollera databasanslutningen
+      security: []
+      responses:
+        '200':
+          description: Databasen är ansluten
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example: { status: ok, database: connected }
+        '503':
+          description: Databasen är inte ansluten
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example: { status: error, database: disconnected }
+  /test-messages:
+    get:
+      tags: [System]
+      summary: Lista testmeddelanden
+      security: []
+      responses:
+        '200':
+          description: Testmeddelanden
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TestMessage'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/login:
+    post:
+      tags: [Autentisering]
+      summary: Logga in och skapa en session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginInput'
+      responses:
+        '200':
+          description: Sessionen gäller i åtta timmar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Login'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/logout:
+    post:
+      tags: [Autentisering]
+      summary: Avsluta den aktuella sessionen
+      responses:
+        '204':
+          description: Sessionen är avslutad
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /me:
+    get:
+      tags: [Autentisering]
+      summary: Visa inloggad användares roller och rättigheter
+      responses:
+        '200':
+          description: Aktuell användare
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users:
+    get:
+      tags: [Användare]
+      summary: Lista användare
+      description: Kräver rättigheten `user:create` (admin).
+      responses:
+        '200':
+          description: Användare utan lösenord
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Användare]
+      summary: Skapa användare
+      description: Kräver rättigheten `user:create` (admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUser'
+      responses:
+        '201':
+          description: Användaren har skapats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [Användare]
+      summary: Ändra användare
+      description: |
+        Kräver `user:create` (admin). Utelämna lösenordet för att behålla det.
+        Vid lösenordsbyte avslutas användarens övriga sessioner.
+        Den sista administratören måste behålla rollen admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUser'
+      responses:
+        '200':
+          description: Uppdaterad användare
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Användare]
+      summary: Ta bort användare
+      description: Kräver `user:create` (admin). Det egna kontot och den sista administratören kan inte tas bort.
+      responses:
+        '204':
+          description: Användaren har tagits bort
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cases:
+    get:
+      tags: [Ärenden]
+      summary: Lista ärenden
+      responses:
+        '200':
+          description: Ärenden
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Case'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Ärenden]
+      summary: Skapa ärende
+      description: Kräver rättigheten `case:create`.
+      requestBody:
+        $ref: '#/components/requestBodies/CaseInput'
+      responses:
+        '201':
+          description: Ärendet har skapats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cases/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Ärenden]
+      summary: Läs ärende
+      responses:
+        '200':
+          description: Ärendet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Ärenden]
+      summary: Ersätt ärendets fält
+      description: Kräver rättigheten `case:update`.
+      requestBody:
+        $ref: '#/components/requestBodies/CaseInput'
+      responses:
+        '200':
+          description: Uppdaterat ärende
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Ärenden]
+      summary: Ta bort ärende
+      description: Kräver `case:delete`. Ärendets handlingar och berörda relationer tas också bort.
+      responses:
+        '204':
+          description: Ärendet har tagits bort
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /records:
+    get:
+      tags: [Handlingar]
+      summary: Lista handlingar
+      responses:
+        '200':
+          description: Handlingar
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Record'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Handlingar]
+      summary: Skapa handling
+      description: Kräver `record:create`. En automatisk parent-child-relation skapas till ärendet.
+      requestBody:
+        $ref: '#/components/requestBodies/RecordInput'
+      responses:
+        '201':
+          description: Handlingen har skapats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /records/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Handlingar]
+      summary: Läs handling
+      responses:
+        '200':
+          description: Handlingen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Handlingar]
+      summary: Ersätt handlingens fält
+      description: Kräver `record:update`. Vid ändrat caseId flyttas den automatiska relationen.
+      requestBody:
+        $ref: '#/components/requestBodies/RecordInput'
+      responses:
+        '200':
+          description: Uppdaterad handling
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Handlingar]
+      summary: Ta bort handling
+      description: Kräver rättigheten `record:delete`. Berörda relationer tas också bort.
+      responses:
+        '204':
+          description: Handlingen har tagits bort
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /relations:
+    get:
+      tags: [Relationer]
+      summary: Lista relationer
+      responses:
+        '200':
+          description: Relationer inklusive automatiska parent-child-relationer
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Relation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Relationer]
+      summary: Skapa manuell relation
+      description: Kräver `relation:manage` (admin). Typen parent-child är reserverad.
+      requestBody:
+        $ref: '#/components/requestBodies/RelationInput'
+      responses:
+        '201':
+          description: Relationen har skapats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /relations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [Relationer]
+      summary: Ändra manuell relation
+      description: Kräver `relation:manage` (admin). Automatiska relationer ändras via handlingen.
+      requestBody:
+        $ref: '#/components/requestBodies/RelationInput'
+      responses:
+        '200':
+          description: Uppdaterad relation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Relationer]
+      summary: Ta bort manuell relation
+      description: Kräver `relation:manage` (admin). Automatiska relationer kan inte tas bort manuellt.
+      responses:
+        '204':
+          description: Relationen har tagits bort
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /value-lists:
+    get:
+      tags: [Värdelistor]
+      summary: Lista värdelistornas värden
+      description: Tomma listor saknas i svaret.
+      responses:
+        '200':
+          description: Listnamn och värden
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ValueListEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /value-list-bindings:
+    get:
+      tags: [Värdelistor]
+      summary: Visa fältens kopplingar till värdelistor
+      responses:
+        '200':
+          description: Kopplingar per objekttyp och fält
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueListBindings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /value-list-definitions:
+    get:
+      tags: [Värdelistor]
+      summary: Lista värdelistornas definitioner och värden
+      description: Kräver `value-list:manage` (admin). Även tomma listor ingår.
+      responses:
+        '200':
+          description: Värdelistdefinitioner
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ValueListDefinition'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Värdelistor]
+      summary: Skapa värdelista
+      description: Kräver `value-list:manage` (admin). Nya listor kopplas inte automatiskt till fält.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValueListCreate'
+      responses:
+        '201':
+          description: Värdelistan har skapats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueListDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /value-list-definitions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [Värdelistor]
+      summary: Ändra en värdelistas beskrivning
+      description: Kräver `value-list:manage` (admin). Listnamn kan inte ändras via API:et.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValueListDescription'
+      responses:
+        '200':
+          description: Uppdaterad beskrivning
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueListDescriptionResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /value-list-definitions/{id}/values:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Värdelistor]
+      summary: Lägg till ett värde
+      description: |
+        Kräver `value-list:manage` (admin). Värdets maximala längd styrs av
+        listans kopplade fält. Ett nytt värde i userRole kan inte tilldelas
+        förrän rollen och dess rättigheter har definierats i koden.
+        Det första värdet aktiverar validering mot en fältkopplad lista.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValueListValueInput'
+      responses:
+        '201':
+          description: Värdet har lagts till
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueListElement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /search:
+    get:
+      tags: [Sök]
+      summary: Sök i ärenden och handlingar
+      parameters:
+        - in: query
+          name: q
+          required: true
+          description: Söktext som innehåller minst ett tecken som inte är blanksteg.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      responses:
+        '200':
+          description: Sökträffar
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token från POST /auth/login.
+  parameters:
+    Id:
+      in: path
+      name: id
+      required: true
+      description: Objektets, användarens eller relationens UUID.
+      schema:
+        $ref: '#/components/schemas/Uuid'
+  requestBodies:
+    CaseInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CaseInput'
+    RecordInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RecordInput'
+    RelationInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RelationInput'
+  responses:
+    BadRequest:
+      description: Ogiltig indata, inklusive ogiltigt UUID eller värde som inte finns i en aktiv värdelista.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Inloggningen misslyckades eller sessionen saknas, är ogiltig eller har gått ut.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Användaren saknar en giltig roll eller rättighet.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Det efterfrågade objektet eller en referens finns inte.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Åtgärden står i konflikt med befintliga data eller skyddade objekt.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Ett internt fel uppstod.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      example: 78fac016-c2f1-4d40-829f-88c3e451ce20
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    Health:
+      type: object
+      required: [status, database]
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+        database:
+          type: string
+          enum: [connected, disconnected]
+    TestMessage:
+      type: object
+      required: [id, message]
+      properties:
+        id:
+          type: integer
+        message:
+          type: string
+    LoginInput:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          maxLength: 50
+        password:
+          type: string
+          format: password
+          maxLength: 1024
+    Login:
+      type: object
+      required: [token, username, expiresIn]
+      properties:
+        token:
+          type: string
+          description: 64 hexadecimala tecken; används som Bearer-token.
+          pattern: '^[0-9a-f]{64}$'
+        username:
+          type: string
+        expiresIn:
+          type: integer
+          description: Sessionens giltighetstid i sekunder.
+          example: 28800
+    CurrentUser:
+      type: object
+      required: [username, roles, permissions, supportedUserRoles]
+      properties:
+        username:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        supportedUserRoles:
+          type: array
+          description: Rollnamn som har rättigheter definierade i koden.
+          items:
+            type: string
+    User:
+      type: object
+      required: [id, username, roles]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        username:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+    UserRolesInput:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      description: Roller måste finnas i userRole och ha rättigheter definierade i koden.
+      items:
+        type: string
+        enum: [admin, Koordinator, Handläggare, Beslutsfattare]
+    CreateUser:
+      type: object
+      required: [username, password, roles]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          description: Inledande och avslutande blanksteg tas bort; namnet ska därefter innehålla 1–50 tecken.
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 1024
+        roles:
+          $ref: '#/components/schemas/UserRolesInput'
+    UpdateUser:
+      type: object
+      required: [username, roles]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          description: Inledande och avslutande blanksteg tas bort; namnet ska därefter innehålla 1–50 tecken.
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 1024
+        roles:
+          $ref: '#/components/schemas/UserRolesInput'
+    AuditFields:
+      type: object
+      required: [objectId, objectType, created, createdBy, lastUpdated, lastUpdatedBy]
+      properties:
+        objectId:
+          $ref: '#/components/schemas/Uuid'
+        objectType:
+          type: string
+        created:
+          type: string
+          description: UTC-tid från MySQL, exempelvis 2026-11-15 09:00:00.000.
+          example: '2026-11-15 09:00:00.000'
+        createdBy:
+          type: string
+        lastUpdated:
+          type: string
+          description: UTC-tid från MySQL.
+          example: '2026-11-15 09:00:00.000'
+        lastUpdatedBy:
+          type: string
+    CaseInput:
+      type: object
+      required: [diaryNumber, classification, extraclass, caseSentence]
+      description: Fält med en aktiv värdelista måste innehålla värden från den listan.
+      properties:
+        diaryNumber:
+          type: string
+          maxLength: 20
+        classification:
+          type: string
+          maxLength: 8
+        extraclass:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+        caseSentence:
+          type: string
+          maxLength: 100
+    Case:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - $ref: '#/components/schemas/CaseInput'
+        - type: object
+          required: [classification_ValueList, extraclass_ValueList]
+          properties:
+            classification_ValueList:
+              type: string
+            extraclass_ValueList:
+              type: string
+    RecordInput:
+      type: object
+      required: [caseId, name, description, recordType]
+      description: recordType måste finnas i värdelistan om den innehåller värden.
+      properties:
+        caseId:
+          $ref: '#/components/schemas/Uuid'
+        name:
+          type: string
+          maxLength: 50
+        description:
+          type: string
+          maxLength: 100
+        recordType:
+          type: string
+          maxLength: 100
+    Record:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - $ref: '#/components/schemas/RecordInput'
+        - type: object
+          required: [recordType_ValueList]
+          properties:
+            recordType_ValueList:
+              type: string
+    RelationInput:
+      type: object
+      required: [sourceId, targetId]
+      properties:
+        sourceId:
+          $ref: '#/components/schemas/Uuid'
+        targetId:
+          $ref: '#/components/schemas/Uuid'
+        relationType:
+          type: string
+          nullable: true
+          maxLength: 100
+          default: ''
+          description: null behandlas som tom sträng. parent-child är reserverad för automatiska relationer.
+    Relation:
+      type: object
+      required: [id, sourceId, targetId, objectTypes, relationType, automatic]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        sourceId:
+          $ref: '#/components/schemas/Uuid'
+        targetId:
+          $ref: '#/components/schemas/Uuid'
+        objectTypes:
+          type: string
+          description: Källans och målets objekttyper i ordning.
+          example: base_case-base_record
+        relationType:
+          type: string
+        automatic:
+          type: boolean
+    ValueListEntry:
+      type: object
+      required: [listName, value]
+      properties:
+        listName:
+          type: string
+        value:
+          type: string
+    ValueListBindings:
+      type: object
+      required: [base_case, base_record]
+      properties:
+        base_case:
+          type: object
+          required: [classification, extraclass]
+          properties:
+            classification:
+              type: string
+              example: classification
+            extraclass:
+              type: string
+              example: extraClass
+        base_record:
+          type: object
+          required: [recordType]
+          properties:
+            recordType:
+              type: string
+              example: recordType
+    ValueListCreate:
+      type: object
+      required: [listName, listDescription]
+      properties:
+        listName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Blanksteg runt namnet tas bort; det får inte vara tomt därefter.
+        listDescription:
+          type: string
+          maxLength: 255
+    ValueListDescription:
+      type: object
+      additionalProperties: false
+      required: [listDescription]
+      properties:
+        listDescription:
+          type: string
+          maxLength: 255
+    ValueListDescriptionResult:
+      type: object
+      required: [objectId, listDescription]
+      properties:
+        objectId:
+          $ref: '#/components/schemas/Uuid'
+        listDescription:
+          type: string
+    ValueListValueInput:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Får inte bestå enbart av blanksteg. En kortare gräns kan gälla för listan.
+    ValueListElement:
+      type: object
+      required: [objectId, value, supported]
+      properties:
+        objectId:
+          $ref: '#/components/schemas/Uuid'
+        value:
+          type: string
+        supported:
+          type: boolean
+          description: För userRole anger detta om rollen stöds i koden; för andra listor är värdet true.
+    ValueListDefinition:
+      type: object
+      required: [objectId, listName, listDescription, boundFields, maxValueLength, values]
+      properties:
+        objectId:
+          $ref: '#/components/schemas/Uuid'
+        listName:
+          type: string
+        listDescription:
+          type: string
+        boundFields:
+          type: array
+          items:
+            type: string
+          example: [base_case.classification]
+        maxValueLength:
+          type: integer
+          description: Den lägsta längdgränsen för kopplade fält, annars 255.
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValueListElement'
+    SearchResult:
+      type: object
+      required: [objectId, objectType, created, createdBy, label, diaryNumber, caseSentence, name, recordType]
+      properties:
+        objectId:
+          $ref: '#/components/schemas/Uuid'
+        objectType:
+          type: string
+          enum: [base_case, base_record]
+        created:
+          type: string
+          description: UTC-tid från MySQL.
+          example: '2026-11-15 09:00:00.000'
+        createdBy:
+          type: string
+        label:
+          type: string
+        diaryNumber:
+          type: string
+          nullable: true
+        caseSentence:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        recordType:
+          type: string
+          nullable: true

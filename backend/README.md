@@ -41,6 +41,8 @@ Ange en eller flera roller efter användarnamnet. Lösenordet lagras som en salt
 
 ## API och Postman
 
+En OpenAPI 3.0-specifikation finns i [openapi.yaml](openapi.yaml) och kan importeras i exempelvis Postman.
+
 API:et finns på `http://localhost:3000/api`. Anropa `POST /auth/login` med JSON:
 
 ```json
