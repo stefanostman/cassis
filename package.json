@@ -1,0 +1,20 @@
+{
+  "name": "cassis",
+  "version": "0.0.1",
+  "description": "ett enkelt ärendesystem",
+  "homepage": "https://github.com/stefanostman/cassis#readme",
+  "bugs": {
+    "url": "https://github.com/stefanostman/cassis/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stefanostman/cassis.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}

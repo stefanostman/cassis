@@ -1,0 +1,387 @@
+<main class="shell">
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Ärendehantering</p>
+      <h1>Cassis</h1>
+    </div>
+    @if (username()) {
+      <div class="account">
+        <span>Inloggad som <strong>{{ username() }}</strong></span>
+        <button class="button button-secondary" type="button" (click)="logout()" [disabled]="busy()">Logga ut</button>
+      </div>
+    }
+  </header>
+
+  @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+  @if (userMessage() && !can('user:create')) { <p role="status">{{ userMessage() }}</p> }
+
+  @if (!username()) {
+    <section class="panel login-panel" aria-labelledby="login-title">
+      <h2 id="login-title">Logga in</h2>
+      <form class="editor" (ngSubmit)="login()">
+        <label class="field-row"><span>Användarnamn</span><input name="username" [(ngModel)]="loginUsername" required autocomplete="username"></label>
+        <label class="field-row"><span>Lösenord</span><input name="password" type="password" [(ngModel)]="password" required autocomplete="current-password"></label>
+        <button class="button button-primary" [disabled]="busy()" type="submit">Logga in</button>
+      </form>
+    </section>
+  } @else {
+    <nav class="main-menu panel" aria-label="Huvudmeny" (click)="$event.stopPropagation()"
+      (focusout)="menuFocusOut($event)" (keydown)="menuEscape($event)">
+      <details [open]="openMenu === 'search'">
+        <summary (click)="$event.preventDefault(); toggleMenu('search')">Sök</summary>
+        <div class="menu-options">
+          <button type="button" (click)="showSearch(searchInput)">Fritext</button>
+        </div>
+      </details>
+      <details [open]="openMenu === 'create'">
+        <summary (click)="$event.preventDefault(); toggleMenu('create')">Skapa</summary>
+        <div class="menu-options">
+          <button type="button" (click)="createCaseFromMenu(caseTitle)" [disabled]="!can('case:create') || busy() || editing">Ärende</button>
+        </div>
+      </details>
+      <details [open]="openMenu === 'admin'">
+        <summary #adminSummary (click)="$event.preventDefault(); toggleMenu('admin')">Administrera</summary>
+        <div class="menu-options">
+          <button type="button" (click)="showAdmin('users'); adminSummary.focus()" [disabled]="!can('user:create') || busy()">Hantera Användare</button>
+          <button type="button" (click)="showAdmin('relations'); adminSummary.focus()" [disabled]="!can('relation:manage') || busy()">Hantera relationer</button>
+          <button type="button" (click)="showAdmin('valueLists'); adminSummary.focus()" [disabled]="!can('value-list:manage') || busy()">Hantera värdelistor</button>
+        </div>
+      </details>
+    </nav>
+
+    <section class="panel admin-panel" [hidden]="!adminPanel" aria-label="Administration">
+      @if (can('relation:manage')) {
+        <div [hidden]="adminPanel !== 'relations'">
+          <h2>Hantera relationer</h2>
+          <div class="user-list" aria-label="Relationer">
+            @for (relation of relations(); track relation.id) {
+              <button type="button" class="user-list-item" [attr.aria-pressed]="selectedRelation?.id === relation.id"
+                (click)="selectRelation(relation)" [disabled]="busy()">
+                <strong>{{ objectLabel(relation.sourceId) }} → {{ objectLabel(relation.targetId) }}</strong>
+                <span>{{ relation.objectTypes }}{{ relation.relationType ? ' · ' + relation.relationType : '' }}{{ relation.automatic ? ' (automatisk)' : '' }}</span>
+              </button>
+            } @empty { <p class="hint">Inga relationer ännu.</p> }
+          </div>
+          <button class="button button-secondary" type="button" (click)="newRelation()" [disabled]="busy()">Ny relation</button>
+          <h3 class="user-form-title">{{ selectedRelation ? 'Relationsdetaljer' : 'Skapa relation' }}</h3>
+          @if (selectedRelation?.automatic) { <p class="hint">Automatisk ärende–handling-relation. Ändras via handlingen.</p> }
+          @if (editing) { <p class="hint">Spara eller avbryt ärendet eller handlingen innan du ändrar relationer.</p> }
+          <form class="editor relation-form" (ngSubmit)="saveRelation()">
+            <label class="field-row"><span>Från</span>
+              <select name="sourceId" [(ngModel)]="relationForm.sourceId" [disabled]="busy() || !!selectedRelation?.automatic" required>
+                <option value="">Välj objekt</option>
+                @if (relationForm.sourceId && !knownObject(relationForm.sourceId)) { <option [value]="relationForm.sourceId">{{ objectLabel(relationForm.sourceId) }}</option> }
+                @for (item of cases(); track item.objectId) { <option [value]="item.objectId">{{ objectLabel(item.objectId) }}</option> }
+                @for (item of records(); track item.objectId) { <option [value]="item.objectId">{{ objectLabel(item.objectId) }}</option> }
+              </select>
+            </label>
+            <label class="field-row"><span>Till</span>
+              <select name="targetId" [(ngModel)]="relationForm.targetId" [disabled]="busy() || !!selectedRelation?.automatic" required>
+                <option value="">Välj objekt</option>
+                @if (relationForm.targetId && !knownObject(relationForm.targetId)) { <option [value]="relationForm.targetId">{{ objectLabel(relationForm.targetId) }}</option> }
+                @for (item of cases(); track item.objectId) { <option [value]="item.objectId">{{ objectLabel(item.objectId) }}</option> }
+                @for (item of records(); track item.objectId) { <option [value]="item.objectId">{{ objectLabel(item.objectId) }}</option> }
+              </select>
+            </label>
+            <label class="field-row"><span>Relationstyp</span><input name="relationType" [(ngModel)]="relationForm.relationType" [disabled]="busy() || !!selectedRelation?.automatic" maxlength="100" placeholder="Valfri"></label>
+            @if (selectedRelation) { <div class="field-row"><span>Objekttyper (sparade)</span><span>{{ selectedRelation.objectTypes }}</span></div> }
+            <div class="actions">
+              <button class="button button-primary" type="submit" [disabled]="busy() || editing || !!selectedRelation?.automatic || !relationForm.sourceId || !relationForm.targetId">{{ selectedRelation ? 'Spara ändringar' : 'Skapa relation' }}</button>
+              @if (selectedRelation) {
+                <button class="button button-danger" type="button" (click)="deleteRelation()" [disabled]="busy() || editing || selectedRelation.automatic">Ta bort relation</button>
+              }
+            </div>
+            @if (relationMessage()) { <p role="status">{{ relationMessage() }}</p> }
+          </form>
+        </div>
+      }
+      @if (can('user:create')) {
+        <div [hidden]="adminPanel !== 'users'">
+          <h2>Hantera Användare</h2>
+          <div class="user-list" aria-label="Användare">
+            @for (user of users(); track user.id) {
+              <button type="button" class="user-list-item" [attr.aria-pressed]="selectedUser?.id === user.id"
+                (click)="selectUser(user)" [disabled]="busy()">
+                <strong>{{ user.username }}</strong><span>{{ user.roles.join(', ') || 'Ingen roll' }}</span>
+              </button>
+            } @empty { <p class="hint">{{ usersLoaded() ? 'Inga användare att visa.' : 'Användarlistan är inte inläst.' }}</p> }
+          </div>
+          <button class="button button-secondary" type="button" (click)="newUser()" [disabled]="busy()">Ny användare</button>
+          <h3 class="user-form-title">{{ selectedUser ? 'Ändra användare' : 'Skapa användare' }}</h3>
+          <form class="editor relation-form" (ngSubmit)="saveUser()">
+            <label class="field-row"><span>Användarnamn</span><input name="newUsername" [(ngModel)]="newUsername" maxlength="50" required autocomplete="off"></label>
+            <label class="field-row"><span>{{ selectedUser ? 'Nytt lösenord (valfritt)' : 'Lösenord' }}</span><input name="newPassword" type="password" [(ngModel)]="newPassword" minlength="8" maxlength="1024" [required]="!selectedUser" autocomplete="new-password"></label>
+            <fieldset class="user-roles">
+              <legend>Användarroller (minst en)</legend>
+              @for (role of availableRoles(); track role) {
+                <label><input #roleInput type="checkbox" [checked]="newUserRoles.includes(role)"
+                  [disabled]="!supportedUserRoles().includes(role) && !newUserRoles.includes(role)"
+                  (change)="toggleUserRole(role, roleInput.checked)"> {{ role }} @if (!supportedUserRoles().includes(role)) { (saknar definierade rättigheter) }</label>
+              } @empty { <p class="hint">Inga användarroller finns i värdelistan userRole.</p> }
+            </fieldset>
+            <div class="actions">
+              <button class="button button-primary" type="submit"
+                [disabled]="busy() || !newUsername.trim() || ((!selectedUser || newPassword.length > 0) && newPassword.length < 8) || newUserRoles.length === 0">{{ selectedUser ? 'Spara ändringar' : 'Skapa användare' }}</button>
+              @if (selectedUser) {
+                <button class="button button-danger" type="button" (click)="deleteUser()" [disabled]="busy() || selectedUser.username === username()">Ta bort användare</button>
+              }
+            </div>
+            @if (userMessage()) { <p role="status">{{ userMessage() }}</p> }
+          </form>
+        </div>
+      }
+      @if (can('value-list:manage')) {
+        <div [hidden]="adminPanel !== 'valueLists'">
+          <h2>Hantera värdelistor</h2>
+          <div class="user-list" aria-label="Värdelistor">
+            @for (list of listDefinitions(); track list.objectId) {
+              <button type="button" class="user-list-item" [attr.aria-pressed]="selectedValueList?.objectId === list.objectId"
+                (click)="selectValueList(list)" [disabled]="busy()">
+                <strong>{{ list.listName }}</strong><span>{{ list.listDescription }}</span>
+              </button>
+            } @empty { <p class="hint">{{ listDefinitionsLoaded() ? 'Inga värdelistor finns.' : 'Värdelistorna är inte inlästa.' }}</p> }
+          </div>
+          <button class="button button-secondary" type="button" (click)="newValueList()" [disabled]="busy()">Ny värdelista</button>
+          <h3 class="user-form-title">{{ selectedValueList ? 'Ändra beskrivning' : 'Skapa värdelista' }}</h3>
+          <form class="editor relation-form" (ngSubmit)="saveValueList()">
+            <label class="field-row"><span>Listnamn</span><input name="listName" [(ngModel)]="listName" maxlength="100" [readonly]="!!selectedValueList" required></label>
+            <label class="field-row"><span>Beskrivning</span><input name="listDescription" [(ngModel)]="listDescription" maxlength="255"></label>
+            <button class="button button-primary" type="submit" [disabled]="busy() || !listName.trim()">{{ selectedValueList ? 'Spara beskrivning' : 'Skapa värdelista' }}</button>
+          </form>
+          @if (selectedValueList; as list) {
+            <h3>Värden</h3>
+            <ul class="value-list-values" aria-label="Värden">
+              @for (entry of list.values; track entry.objectId) {
+                <li>{{ entry.value }} @if (!entry.supported) { <span class="hint">(saknar definierade rättigheter och kan inte användas som roll)</span> }</li>
+              } @empty { <li class="hint">Listan har inga värden.</li> }
+            </ul>
+            @if (list.boundFields.length) { <p class="hint">Används av {{ list.boundFields.join(', ') }}. Värden får innehålla högst {{ list.maxValueLength }} tecken.</p> }
+            <form class="editor relation-form" (ngSubmit)="addListValue()">
+              <label class="field-row"><span>Nytt värde</span><input name="listValue" [(ngModel)]="listValue" [attr.maxlength]="list.maxValueLength" required></label>
+              <button class="button button-primary" type="submit" [disabled]="busy() || !listValue.trim()">Lägg till värde</button>
+            </form>
+          }
+          @if (valueListMessage()) { <p role="status">{{ valueListMessage() }}</p> }
+        </div>
+      }
+    </section>
+
+    <section class="panel search-panel" aria-labelledby="search-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">01 / Sök</p><h2 id="search-title">Sök i Cassis</h2></div>
+        @if (searched()) { <span class="count">{{ results().length }} träffar</span> }
+      </div>
+      <form class="search-form" (ngSubmit)="search()">
+        <label for="search-query">Fritextsökning</label>
+        <div class="search-controls">
+          <input #searchInput id="search-query" name="query" [(ngModel)]="searchQuery" maxlength="255" required placeholder="Sök bland ärenden och handlingar">
+          <button class="button button-primary" type="submit" [disabled]="busy() || !searchQuery.trim()">Sök</button>
+        </div>
+      </form>
+      @if (searched()) {
+        @if (editing) { <p class="hint">Spara eller avbryt ändringen innan du väljer en annan träff.</p> }
+        <p class="hint">Tabellen kan rullas i sidled för att visa alla kolumner.</p>
+        <div class="table-wrap" role="region" aria-label="Sökresultat" tabindex="0">
+          <table>
+            <thead><tr><th scope="col">object_typ</th><th scope="col">created</th><th scope="col">createdBy</th><th scope="col">diary_number</th><th scope="col">CaseSentence</th><th scope="col">name</th><th scope="col">recordType</th></tr></thead>
+            <tbody>
+              @for (result of results(); track result.objectId) {
+                <tr>
+                  <td><span class="type-badge">{{ result.objectType }}</span></td>
+                  <td>{{ result.created }}</td>
+                  <td>{{ result.createdBy }}</td>
+                  <td>
+                    @if (result.objectType === 'base_case') {
+                      <button class="result-link" type="button" (click)="selectResult(result)" [disabled]="busy() || editing">{{ result.diaryNumber || '(utan diarienummer)' }}</button>
+                    } @else { — }
+                  </td>
+                  <td>{{ result.caseSentence ?? '—' }}</td>
+                  <td>
+                    @if (result.objectType === 'base_record') {
+                      <button class="result-link" type="button" (click)="selectResult(result)" [disabled]="busy() || editing">{{ result.name || '(utan namn)' }}</button>
+                    } @else { — }
+                  </td>
+                  <td>{{ result.recordType ?? '—' }}</td>
+                </tr>
+              } @empty {
+                <tr><td class="empty-cell" colspan="7">Inga träffar. Prova en annan sökning.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="hint">Sök i alla fält och välj en träff för att visa objektet nedan.</p>
+      }
+
+    </section>
+
+    <section class="panel" aria-labelledby="case-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">02 / base_case</p><h2 #caseTitle id="case-title" tabindex="-1">Ärende</h2></div>
+        @if (caseMode === 'view') {
+          <div class="actions">
+            @if (selectedCase(); as item) {
+              @if (can('case:update')) {
+              <button class="button button-secondary" type="button" (click)="editCase(item)" [disabled]="busy() || editing">Ändra</button>
+              }
+              @if (can('case:delete')) {
+              <button class="button button-danger" type="button" (click)="deleteCase(item)" [disabled]="busy() || editing">Ta bort</button>
+              }
+            }
+          </div>
+        }
+      </div>
+      @if (caseMode !== 'view') {
+        <h3>{{ caseMode === 'create' ? 'Nytt ärende' : 'Ändra ärende' }}</h3>
+        <form class="editor" (ngSubmit)="saveCase()">
+          <label class="field-row"><span>caseSentence</span><input name="caseSentence" [(ngModel)]="caseForm.caseSentence" maxlength="100"></label>
+          <label class="field-row"><span>diaryNumber</span><input name="diaryNumber" [(ngModel)]="caseForm.diaryNumber" maxlength="20"></label>
+          <label class="field-row"><span>classification</span>
+            @if (valueLists()['classification']; as values) {
+              <select name="classification" [(ngModel)]="caseForm.classification" required>
+                <option value="" disabled>Välj värde</option>
+                @if (caseForm.classification && !values.includes(caseForm.classification)) { <option [value]="caseForm.classification" disabled>{{ caseForm.classification }} (välj ett nytt värde)</option> }
+                @for (value of values; track value) { <option [value]="value">{{ value }}</option> }
+              </select>
+            } @else { <input name="classification" [(ngModel)]="caseForm.classification" maxlength="8"> }
+          </label>
+          @if (valueLists()['extraclass']; as values) {
+            <div class="field-row">
+              <span>extraclass</span>
+              <div>
+                <label>Välj värde
+                  <select #extraClassSelect (change)="addExtraClass(extraClassSelect)">
+                    <option value="">Välj värde</option>
+                    @for (value of values; track value) { <option [value]="value">{{ value }}</option> }
+                  </select>
+                </label>
+                @for (value of caseExtraValues; track $index; let i = $index) {
+                  <div class="actions">
+                    <span>{{ value }} @if (!values.includes(value)) { (finns inte i listan) }</span>
+                    <button class="button button-secondary" type="button" (click)="removeExtraClass(i)" [attr.aria-label]="'Ta bort ' + value">Ta bort</button>
+                  </div>
+                }
+              </div>
+            </div>
+          } @else {
+            <label class="field-row"><span>extraclass <small>En per rad</small></span><textarea name="extraclass" [(ngModel)]="caseForm.extraclass"></textarea></label>
+          }
+          <div class="actions"><button class="button button-primary" type="submit" [disabled]="busy()">Spara</button><button class="button button-secondary" type="button" (click)="cancelCase()" [disabled]="busy()">Avbryt</button></div>
+        </form>
+      } @else if (selectedCase(); as item) {
+        <h3 class="object-title">{{ item.caseSentence || '(utan ärenderubrik)' }}</h3>
+        <dl class="field-list">
+          <div class="field-row"><dt>diaryNumber</dt><dd>{{ item.diaryNumber || '—' }}</dd></div>
+          <div class="field-row"><dt>classification</dt><dd>{{ item.classification || '—' }}</dd></div>
+          <div class="field-row"><dt>extraclass</dt><dd>{{ item.extraclass.join(', ') || '—' }}</dd></div>
+          <div class="field-row"><dt>objectType</dt><dd>{{ item.objectType }}</dd></div>
+          <div class="field-row"><dt>created</dt><dd>{{ item.created }}</dd></div>
+          <div class="field-row"><dt>createdBy</dt><dd>{{ item.createdBy }}</dd></div>
+          <div class="field-row"><dt>lastUpdated</dt><dd>{{ item.lastUpdated }}</dd></div>
+          <div class="field-row"><dt>lastUpdatedBy</dt><dd>{{ item.lastUpdatedBy }}</dd></div>
+        </dl>
+      } @else {
+        <p class="empty-state">Välj ett ärende i sökresultatet eller skapa ett nytt.</p>
+      }
+    </section>
+
+    <section class="panel" aria-labelledby="record-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">03 / base_record</p><h2 id="record-title">Handling</h2></div>
+        @if (recordMode === 'view' && can('record:create')) {
+          <div class="actions">
+            <button class="button button-primary" type="button" (click)="newRecord()" [disabled]="busy() || editing || !selectedCase()">Ny handling</button>
+          </div>
+        }
+      </div>
+      <ng-template #recordEditor>
+        <form class="editor" (ngSubmit)="saveRecord()">
+          <label class="field-row"><span>name</span><input name="name" [(ngModel)]="recordForm.name" maxlength="50"></label>
+          <label class="field-row"><span>Ärende</span>
+            <select name="caseId" [(ngModel)]="recordForm.caseId" required>
+              <option value="">Välj ärende</option>
+              @for (item of cases(); track item.objectId) { <option [value]="item.objectId">{{ item.diaryNumber }} — {{ item.caseSentence }}</option> }
+            </select>
+          </label>
+          <label class="field-row"><span>description</span><input name="description" [(ngModel)]="recordForm.description" maxlength="100"></label>
+          <label class="field-row"><span>recordType</span>
+            @if (valueLists()['recordType']; as values) {
+              <select name="recordType" [(ngModel)]="recordForm.recordType" required>
+                <option value="" disabled>Välj värde</option>
+                @if (recordForm.recordType && !values.includes(recordForm.recordType)) { <option [value]="recordForm.recordType" disabled>{{ recordForm.recordType }} (välj ett nytt värde)</option> }
+                @for (value of values; track value) { <option [value]="value">{{ value }}</option> }
+              </select>
+            } @else { <input name="recordType" [(ngModel)]="recordForm.recordType" maxlength="100"> }
+          </label>
+          <div class="actions"><button class="button button-primary" type="submit" [disabled]="busy() || !recordForm.caseId">Spara</button><button class="button button-secondary" type="button" (click)="cancelRecord()" [disabled]="busy()">Avbryt</button></div>
+        </form>
+      </ng-template>
+      @if (recordMode === 'create') {
+        <div class="record-create">
+          <h3>Ny handling</h3>
+          <ng-container [ngTemplateOutlet]="recordEditor"></ng-container>
+        </div>
+      }
+      @if (selectedCase() && caseRecords().length > 0) {
+        <p class="record-list-heading">Handlingar i ärendet <span class="count">{{ caseRecords().length }}</span></p>
+        <div class="record-list">
+          @for (item of caseRecords(); track item.objectId) {
+            <article class="record-item">
+              <h3>
+                <button class="record-toggle" type="button" [id]="'record-toggle-' + item.objectId"
+                  [attr.aria-expanded]="openRecordIds().has(item.objectId)"
+                  [attr.aria-controls]="'record-content-' + item.objectId"
+                  (click)="toggleRecord(item)" [disabled]="busy() || editing">
+                  <span>{{ item.name || '(utan namn)' }}</span>
+                  <span class="record-toggle-meta">
+                    @if (item.caseId !== selectedCaseId()) { <span class="type-badge">Kopplad</span> }
+                    @if (item.recordType) { <span class="type-badge">{{ item.recordType }}</span> }
+                    <span class="record-toggle-icon" aria-hidden="true">{{ openRecordIds().has(item.objectId) ? '−' : '+' }}</span>
+                  </span>
+                </button>
+              </h3>
+              <div class="record-content" [id]="'record-content-' + item.objectId" role="region"
+                [attr.aria-labelledby]="'record-toggle-' + item.objectId" [hidden]="!openRecordIds().has(item.objectId)">
+                @if (openRecordIds().has(item.objectId)) {
+                  @if (recordMode === 'edit' && editingRecordId === item.objectId) {
+                    <h4>Ändra handling</h4>
+                    <ng-container [ngTemplateOutlet]="recordEditor"></ng-container>
+                  } @else {
+                    <div class="actions record-actions">
+                      @if (can('record:update')) {
+                      <button class="button button-secondary" type="button" (click)="editRecord(item)" [disabled]="busy() || editing">Ändra</button>
+                      }
+                      @if (can('record:delete') && item.caseId === selectedCaseId()) {
+                      <button class="button button-danger" type="button" (click)="deleteRecord(item)" [disabled]="busy() || editing">Ta bort</button>
+                      }
+                      @if (can('relation:manage')) {
+                        @for (relation of manualCaseRelations(item); track relation.id) {
+                          <button class="button button-secondary" type="button" (click)="unlinkRecord(relation)" [disabled]="busy() || editing"
+                            [attr.aria-label]="'Ta bort koppling (' + (relation.relationType || 'utan relationstyp') + ') för ' + (item.name || '(utan namn)')">Ta bort koppling ({{ relation.relationType || 'utan relationstyp' }})</button>
+                        }
+                      }
+                    </div>
+                    <dl class="field-list">
+                      <div class="field-row"><dt>Ärende</dt><dd>{{ recordCaseNumber(item) }}</dd></div>
+                      <div class="field-row"><dt>description</dt><dd>{{ item.description || '—' }}</dd></div>
+                      <div class="field-row"><dt>recordType</dt><dd>{{ item.recordType || '—' }}</dd></div>
+                      <div class="field-row"><dt>objectType</dt><dd>{{ item.objectType }}</dd></div>
+                      <div class="field-row"><dt>created</dt><dd>{{ item.created }}</dd></div>
+                      <div class="field-row"><dt>createdBy</dt><dd>{{ item.createdBy }}</dd></div>
+                      <div class="field-row"><dt>lastUpdated</dt><dd>{{ item.lastUpdated }}</dd></div>
+                      <div class="field-row"><dt>lastUpdatedBy</dt><dd>{{ item.lastUpdatedBy }}</dd></div>
+                    </dl>
+                  }
+                }
+              </div>
+            </article>
+          }
+        </div>
+      } @else if (selectedCase()) {
+        <p class="empty-state">Ärendet har inga handlingar ännu.</p>
+      } @else {
+        <p class="empty-state">Välj ett ärende eller en handling i sökresultatet.</p>
+      }
+    </section>
+  }
+</main>

@@ -1,0 +1,29 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "setup": "node src/setup.js",
+    "migrate-record-relations": "node src/migrate-record-relations.js",
+    "migrate-relation-object-types": "node src/migrate-relation-object-types.js",
+    "migrate-value-list-references": "node src/migrate-value-list-references.js",
+    "migrate-value-list-objects": "node src/migrate-value-list-objects.js",
+    "create-user": "node src/create-user.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "mysql2": "^3.24.6"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
