@@ -34,11 +34,13 @@ test('reads explicit column defaults and rejects inconsistent extraclass referen
     { TABLE_NAME: 'base_case', COLUMN_NAME: 'extraclass_ValueList', COLUMN_DEFAULT: 'extra' },
     { TABLE_NAME: 'case_extraclass', COLUMN_NAME: 'value_ValueList', COLUMN_DEFAULT: 'extra' },
     { TABLE_NAME: 'base_record', COLUMN_NAME: 'recordType_ValueList', COLUMN_DEFAULT: 'types' },
+    { TABLE_NAME: 'base_document', COLUMN_NAME: 'documentType_ValueList', COLUMN_DEFAULT: 'documents' },
   ];
   const connection = { execute: async () => [rows] };
   assert.deepEqual(await getValueListBindings(connection), {
     base_case: { classification: 'classes', extraclass: 'extra' },
     base_record: { recordType: 'types' },
+    base_document: { documentType: 'documents' },
   });
 
   rows[2].COLUMN_DEFAULT = 'other';
@@ -49,6 +51,7 @@ test('limits shared lists to the strictest bound field and marks unsupported rol
   const bindings = {
     base_case: { classification: 'shared', extraclass: 'shared' },
     base_record: { recordType: 'other' },
+    base_document: { documentType: 'other' },
   };
   assert.deepEqual(valueListConstraints('shared', bindings), {
     boundFields: ['base_case.classification', 'base_case.extraclass'], maxValueLength: 8,

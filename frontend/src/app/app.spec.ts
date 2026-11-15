@@ -58,6 +58,7 @@ describe('App', () => {
     bindings = {
       base_case: { classification: 'classification', extraclass: 'extraClass' },
       base_record: { recordType: 'recordType' },
+      base_document: { documentType: 'documentType' },
     }, permissions = allPermissions, extraCases: typeof testCase[] = [],
     initialRelations = [
       { id: 'record-1', sourceId: 'case-1', targetId: 'record-1', objectTypes: 'base_case-base_record', relationType: 'parent-child', automatic: true },
@@ -67,6 +68,7 @@ describe('App', () => {
     sessionStorage.setItem('cassisUsername', 'test');
     let currentRecords = initialRecords.slice(0, singleRecord ? 1 : undefined).map((record) => ({ ...record }));
     let currentCase = { ...testCase };
+    const documents: { objectId: string; recordId: string; name: string; documentType: string; filetype: string; filesize: number; filename: string; originalFilename: string | null }[] = [];
     let users = [
       { id: 'user-1', username: 'test', roles: ['admin'] },
       { id: 'user-2', username: 'anna', roles: ['Handläggare'] },
@@ -78,6 +80,27 @@ describe('App', () => {
     ];
     let relations = initialRelations.map((relation) => ({ ...relation }));
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/documents') return { ok: true, status: 200, json: async () => [...documents] };
+      if (url === '/api/records/record-1/documents' && options?.method === 'POST') {
+        const body = options.body as FormData;
+        const file = body.get('file') as File;
+        const document = { objectId: 'document-1', recordId: 'record-1', name: String(body.get('name')),
+          documentType: String(body.get('documentType')), filetype: 'pdf', filesize: file.size, filename: 'document-1.pdf', originalFilename: file.name };
+        documents.push(document);
+        return { ok: true, status: 201, json: async () => document };
+      }
+      if (url === '/api/documents/document-1' && options?.method === 'PUT') {
+        const changes = JSON.parse(String(options.body));
+        Object.assign(documents[0], changes);
+        return { ok: true, status: 200, json: async () => ({ objectId: 'document-1', name: changes.name }) };
+      }
+      if (url === '/api/documents/document-1' && options?.method === 'DELETE') {
+        documents.splice(0, 1);
+        return { ok: true, status: 204 };
+      }
+      if (url === '/api/documents/document-1/content') {
+        return { ok: true, status: 200, blob: async () => new Blob(['innehåll'], { type: 'application/pdf' }) };
+      }
       if (url === '/api/value-list-definitions' && options?.method === 'POST') {
         const body = JSON.parse(String(options.body));
         const list = { objectId: 'new-list', listName: body.listName.trim(), listDescription: body.listDescription,
@@ -157,7 +180,11 @@ describe('App', () => {
         ok: true,
         status: 200,
         json: async () => url.startsWith('/api/search?')
-          ? [
+          ? url === '/api/search?q=avtal.pdf'
+            ? documents.filter((document) => document.originalFilename === 'avtal.pdf').map((document) => ({
+                ...document, ...audit, objectType: 'base_document', diaryNumber: null, caseSentence: null, recordType: null,
+              }))
+            : [
               { objectId: 'case-1', objectType: 'base_case', label: 'D-1', diaryNumber: blankNames ? '' : 'D-1', caseSentence: 'Ärenderubrik', name: null, recordType: null, ...audit },
               { objectId: 'record-2', objectType: 'base_record', label: 'Handling två', diaryNumber: null, caseSentence: null, name: blankNames ? '' : 'Handling två', recordType: 'Bilaga', ...audit },
             ]
@@ -189,6 +216,202 @@ describe('App', () => {
     return { fixture, element };
   }
 
+  it('imports a document for the open record and shows its metadata', async () => {
+    const { fixture, element } = await workspace(false, true, records, [{ listName: 'documentType', value: 'Avtal' }]);
+    element.querySelector<HTMLButtonElement>('.result-link')!.click();
+    fixture.detectChanges();
+    const section = element.querySelector<HTMLElement>('.record-content')!;
+    expect(section.textContent).toContain('Dokument i handlingen');
+    expect(section.textContent).toContain('Inga dokument har importerats');
+    expect(section.querySelector('.empty-cell')?.getAttribute('colspan')).toBe('5');
+    expect(section.querySelector('thead')?.textContent).not.toContain('Filnamn');
+    const searchInput = element.querySelector<HTMLInputElement>('#search-query')!;
+    searchInput.value = 'avtal.pdf';
+    searchInput.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    element.querySelector<HTMLFormElement>('.search-form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(element.querySelector('.search-panel tbody')?.textContent).toContain('Inga träffar');
+      expect(element.querySelector<HTMLButtonElement>('.search-form button')?.disabled).toBe(false);
+    });
+    [...section.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Importera dokument')!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const file = new File(['innehåll'], 'avtal.pdf', { type: 'application/pdf' });
+    const input = section.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    const name = section.querySelector<HTMLInputElement>('input[name="documentName"]')!;
+    name.value = 'Mitt avtal';
+    name.dispatchEvent(new Event('input'));
+    const type = section.querySelector<HTMLSelectElement>('select[name="documentType"]')!;
+    type.value = 'Avtal';
+    type.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    section.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(section.textContent).toContain('Mitt avtal');
+      expect(section.textContent).not.toContain('document-1.pdf');
+      expect(section.querySelector('form')).toBeNull();
+      expect(element.querySelector('.search-panel tbody')?.textContent).toContain('base_document');
+      expect(element.querySelector('.search-panel tbody')?.textContent).toContain('avtal.pdf');
+    });
+    const call = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/records/record-1/documents')!;
+    expect(call[1]?.headers).toEqual({ Authorization: 'Bearer test-token' });
+    expect((call[1]?.body as FormData).get('documentType')).toBe('Avtal');
+
+    element.querySelector<HTMLButtonElement>('.record-toggle')!.click();
+    fixture.detectChanges();
+    expect(element.querySelector<HTMLButtonElement>('.record-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    element.querySelector<HTMLButtonElement>('.search-panel .result-link')!.click();
+    fixture.detectChanges();
+    expect(element.querySelector<HTMLButtonElement>('.record-toggle')?.getAttribute('aria-expanded')).toBe('true');
+
+    const row = section.querySelector<HTMLTableRowElement>('tbody tr')!;
+    const openMenu = () => {
+      const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 });
+      row.dispatchEvent(event);
+      fixture.detectChanges();
+      expect(event.defaultPrevented).toBe(true);
+    };
+    openMenu();
+    expect([...section.querySelectorAll('[role="menuitem"]')].map((button) => button.textContent?.trim()))
+      .toEqual(['Redigera metadata', 'Öppna dokument', 'Ladda ned dokument', 'Ta bort']);
+    let submittedAction = '';
+    let submittedToken = '';
+    vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function (this: HTMLFormElement) {
+      submittedAction = this.action;
+      submittedToken = this.querySelector<HTMLInputElement>('input[name="token"]')!.value;
+    });
+    [...section.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((button) => button.textContent?.trim() === 'Öppna dokument')!.click();
+    expect(submittedAction).toContain('/api/documents/document-1/open');
+    expect(submittedToken).toBe('test-token');
+
+    openMenu();
+    vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValue('blob:test'), revokeObjectURL: vi.fn() });
+    let downloadName = '';
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloadName = this.download;
+    });
+    [...section.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((button) => button.textContent?.trim() === 'Ladda ned dokument')!.click();
+    await vi.waitFor(() => expect(downloadName).toBe('avtal.pdf'));
+
+    openMenu();
+    [...section.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((button) => button.textContent?.trim() === 'Redigera metadata')!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const displayName = section.querySelector<HTMLInputElement>('input[name="editingDocumentName"]')!;
+    displayName.value = 'Nytt namn';
+    displayName.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    section.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(row.textContent).toContain('Nytt namn');
+      expect(section.querySelector<HTMLButtonElement>('.document-menu-trigger')?.disabled).toBe(false);
+      expect(element.querySelector('.search-panel tbody')?.textContent).toContain('Nytt namn');
+    });
+    const edit = vi.mocked(fetch).mock.calls.find(([url, options]) => url === '/api/documents/document-1' && options?.method === 'PUT')!;
+    expect(JSON.parse(String(edit[1]?.body))).toEqual({ name: 'Nytt namn' });
+
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal('confirm', confirm);
+    openMenu();
+    [...section.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((button) => button.textContent?.trim() === 'Ta bort')!.click();
+    expect(vi.mocked(fetch).mock.calls.some(([url, options]) => url === '/api/documents/document-1' && options?.method === 'DELETE')).toBe(false);
+    openMenu();
+    [...section.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((button) => button.textContent?.trim() === 'Ta bort')!.click();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(section.textContent).toContain('Inga dokument har importerats');
+      expect(element.querySelector('.search-panel tbody')?.textContent).toContain('Inga träffar');
+    });
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('imports a file dropped on the document form', async () => {
+    const { fixture, element } = await workspace(false, true, records, [{ listName: 'documentType', value: 'Avtal' }]);
+    element.querySelector<HTMLButtonElement>('.result-link')!.click();
+    fixture.detectChanges();
+    const section = element.querySelector<HTMLElement>('.record-content')!;
+    [...section.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Importera dokument')!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const zone = section.querySelector<HTMLElement>('.document-dropzone')!;
+    const file = new File(['dokument'], 'avtal.PDF');
+    const drag = new Event('dragover', { bubbles: true, cancelable: true });
+    zone.dispatchEvent(drag);
+    fixture.detectChanges();
+    expect(drag.defaultPrevented).toBe(true);
+    expect(zone.classList.contains('document-dragging')).toBe(true);
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] } });
+    zone.dispatchEvent(drop);
+    fixture.detectChanges();
+    expect(drop.defaultPrevented).toBe(true);
+    expect(zone.classList.contains('document-dragging')).toBe(false);
+    expect(zone.textContent).toContain('avtal.PDF');
+    const name = section.querySelector<HTMLInputElement>('input[name="documentName"]')!;
+    name.value = 'Avtal';
+    name.dispatchEvent(new Event('input'));
+    const type = section.querySelector<HTMLSelectElement>('select[name="documentType"]')!;
+    type.value = 'Avtal';
+    type.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    section.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(section.querySelector('tbody')?.textContent).toContain('Avtal');
+      expect(section.querySelector('form')).toBeNull();
+    });
+    const call = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/records/record-1/documents')!;
+    expect(((call[1]?.body as FormData).get('file') as File).name).toBe('avtal.PDF');
+  });
+
+  it('rejects invalid dropped files without keeping the previous selection', async () => {
+    const { fixture, element } = await workspace(false, true, records, [{ listName: 'documentType', value: 'Avtal' }]);
+    element.querySelector<HTMLButtonElement>('.result-link')!.click();
+    fixture.detectChanges();
+    const section = element.querySelector<HTMLElement>('.record-content')!;
+    [...section.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Importera dokument')!.click();
+    fixture.detectChanges();
+    const zone = section.querySelector<HTMLElement>('.document-dropzone')!;
+    const dropFiles = (files: File[]) => {
+      const event = new Event('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', { value: { files } });
+      zone.dispatchEvent(event);
+      fixture.detectChanges();
+    };
+    const valid = new File(['a'], 'avtal.pdf');
+    dropFiles([valid]);
+    expect(zone.textContent).toContain('avtal.pdf');
+    dropFiles([valid, valid]);
+    expect(zone.querySelector('[role="alert"]')?.textContent).toContain('en fil');
+    expect(zone.querySelector('[role="status"]')).toBeNull();
+    dropFiles([new File(['a'], 'skadlig.exe')]);
+    expect(zone.querySelector('[role="alert"]')?.textContent).toContain('Filtypen stöds inte');
+    const tooLarge = new File(['a'], 'stor.pdf');
+    Object.defineProperty(tooLarge, 'size', { value: 25 * 1024 * 1024 + 1 });
+    dropFiles([tooLarge]);
+    expect(zone.querySelector('[role="alert"]')?.textContent).toContain('högst 25 MiB');
+    dropFiles([]);
+    expect(zone.querySelector('[role="alert"]')?.textContent).toContain('Välj eller släpp');
+    expect(section.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+  });
+
+  it('does not offer document import without record update permission', async () => {
+    const { fixture, element } = await workspace(false, true, records, [], undefined, ['read']);
+    element.querySelector<HTMLButtonElement>('.result-link')!.click();
+    fixture.detectChanges();
+    expect(element.querySelector('.record-content')?.textContent).toContain('Dokument i handlingen');
+    expect(element.querySelector('.record-content')?.textContent).not.toContain('Importera dokument');
+  });
+
   function chooseMenu(element: HTMLElement, menu: string, option: string): void {
     const details = [...element.querySelectorAll<HTMLDetailsElement>('.main-menu details')]
       .find((item) => item.querySelector('summary')?.textContent?.trim() === menu)!;
@@ -204,11 +427,12 @@ describe('App', () => {
     expect(element.querySelector('tbody')?.textContent).toContain(audit.created);
     expect(element.querySelector('tbody')?.textContent).toContain(audit.createdBy);
     const headings = [...element.querySelectorAll('thead th')].map((cell) => cell.textContent?.trim());
-    expect(headings).toEqual(['object_typ', 'created', 'createdBy', 'diary_number', 'CaseSentence', 'name', 'recordType']);
+    expect(headings).toEqual(['object_typ', 'created', 'createdBy', 'diary_number', 'CaseSentence', 'name', 'recordType',
+      'documentType', 'filetype', 'filesize', 'filename', 'originalFilename']);
     const rows = [...element.querySelectorAll('tbody tr')].map((row) =>
       [...row.querySelectorAll('td')].map((cell) => cell.textContent?.trim()));
-    expect(rows[0].slice(3)).toEqual(['D-1', 'Ärenderubrik', '—', '—']);
-    expect(rows[1].slice(3)).toEqual(['—', '—', 'Handling två', 'Bilaga']);
+    expect(rows[0].slice(3)).toEqual(['D-1', 'Ärenderubrik', '—', '—', '—', '—', '—', '—', '—']);
+    expect(rows[1].slice(3)).toEqual(['—', '—', 'Handling två', 'Bilaga', '—', '—', '—', '—', '—']);
     const result = [...element.querySelectorAll<HTMLButtonElement>('.result-link')].find((button) => button.textContent?.includes('Handling två'));
     result?.click();
     fixture.detectChanges();
@@ -341,7 +565,7 @@ describe('App', () => {
     const content = element.querySelector<HTMLElement>('.record-content:not([hidden])')!;
     expect(content.querySelector('.field-list dd')?.textContent?.trim()).toBe('D-2');
     expect([...content.querySelectorAll('button')].map((button) => button.textContent?.trim()))
-      .toEqual(['Ändra', 'Ta bort koppling (relaterad)', 'Ta bort koppling (bilaga)']);
+      .toEqual(['Importera dokument', 'Ändra', 'Ta bort koppling (relaterad)', 'Ta bort koppling (bilaga)']);
     vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
     [...content.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('relaterad'))!.click();
     await vi.waitFor(() => {
@@ -887,6 +1111,7 @@ describe('App', () => {
     const { fixture, element } = await workspace(false, false, records, lists, {
       base_case: { classification: 'explicit-class-list', extraclass: 'extraClass' },
       base_record: { recordType: 'recordType' },
+      base_document: { documentType: 'documentType' },
     });
     element.querySelector<HTMLButtonElement>('.result-link')?.click();
     fixture.detectChanges();
@@ -930,7 +1155,8 @@ describe('App', () => {
     fixture.detectChanges();
     element.querySelector<HTMLButtonElement>('.record-toggle')!.click();
     fixture.detectChanges();
-    element.querySelector<HTMLButtonElement>('.record-content:not([hidden]) .button-secondary')!.click();
+    [...element.querySelectorAll<HTMLButtonElement>('.record-content:not([hidden]) .button-secondary')]
+      .find((button) => button.textContent?.trim() === 'Ändra')!.click();
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();

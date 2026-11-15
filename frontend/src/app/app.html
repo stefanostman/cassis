@@ -174,7 +174,7 @@
       <form class="search-form" (ngSubmit)="search()">
         <label for="search-query">Fritextsökning</label>
         <div class="search-controls">
-          <input #searchInput id="search-query" name="query" [(ngModel)]="searchQuery" maxlength="255" required placeholder="Sök bland ärenden och handlingar">
+          <input #searchInput id="search-query" name="query" [(ngModel)]="searchQuery" maxlength="255" required placeholder="Sök bland ärenden, handlingar och dokument">
           <button class="button button-primary" type="submit" [disabled]="busy() || !searchQuery.trim()">Sök</button>
         </div>
       </form>
@@ -183,7 +183,7 @@
         <p class="hint">Tabellen kan rullas i sidled för att visa alla kolumner.</p>
         <div class="table-wrap" role="region" aria-label="Sökresultat" tabindex="0">
           <table>
-            <thead><tr><th scope="col">object_typ</th><th scope="col">created</th><th scope="col">createdBy</th><th scope="col">diary_number</th><th scope="col">CaseSentence</th><th scope="col">name</th><th scope="col">recordType</th></tr></thead>
+            <thead><tr><th scope="col">object_typ</th><th scope="col">created</th><th scope="col">createdBy</th><th scope="col">diary_number</th><th scope="col">CaseSentence</th><th scope="col">name</th><th scope="col">recordType</th><th scope="col">documentType</th><th scope="col">filetype</th><th scope="col">filesize</th><th scope="col">filename</th><th scope="col">originalFilename</th></tr></thead>
             <tbody>
               @for (result of results(); track result.objectId) {
                 <tr>
@@ -197,14 +197,19 @@
                   </td>
                   <td>{{ result.caseSentence ?? '—' }}</td>
                   <td>
-                    @if (result.objectType === 'base_record') {
+                    @if (result.objectType === 'base_record' || result.objectType === 'base_document') {
                       <button class="result-link" type="button" (click)="selectResult(result)" [disabled]="busy() || editing">{{ result.name || '(utan namn)' }}</button>
                     } @else { — }
                   </td>
                   <td>{{ result.recordType ?? '—' }}</td>
+                  <td>{{ result.documentType ?? '—' }}</td>
+                  <td>{{ result.filetype ?? '—' }}</td>
+                  <td>{{ result.filesize ?? '—' }}</td>
+                  <td>{{ result.filename ?? '—' }}</td>
+                  <td>{{ result.originalFilename ?? '—' }}</td>
                 </tr>
               } @empty {
-                <tr><td class="empty-cell" colspan="7">Inga träffar. Prova en annan sökning.</td></tr>
+                <tr><td class="empty-cell" colspan="12">Inga träffar. Prova en annan sökning.</td></tr>
               }
             </tbody>
           </table>
@@ -347,6 +352,70 @@
                     <h4>Ändra handling</h4>
                     <ng-container [ngTemplateOutlet]="recordEditor"></ng-container>
                   } @else {
+                    <div class="document-section">
+                      <div class="actions document-heading">
+                        <h4>Dokument i handlingen</h4>
+                        @if (can('record:update') && !documentRecordId) {
+                          <button class="button button-secondary" type="button" (click)="importDocument(item)" [disabled]="busy() || editing">Importera dokument</button>
+                        }
+                      </div>
+                      <div class="table-wrap">
+                        <table [attr.aria-label]="'Dokument i ' + (item.name || 'handling')">
+                          <thead><tr><th scope="col">Namn</th><th scope="col">Dokumenttyp</th><th scope="col">Filtyp</th><th scope="col">Storlek (byte)</th><th scope="col">Åtgärder</th></tr></thead>
+                          <tbody>
+                            @for (document of documentsFor(item.objectId); track document.objectId) {
+                              <tr (contextmenu)="showDocumentMenu($event, document)">
+                                <td>{{ document.name }}</td><td>{{ document.documentType }}</td><td>{{ document.filetype }}</td><td>{{ document.filesize }}</td>
+                                <td><button class="document-menu-trigger" type="button" (click)="showDocumentMenu($event, document)"
+                                  [disabled]="busy() || editing" [attr.aria-label]="'Åtgärder för ' + document.name"
+                                  aria-haspopup="menu" [attr.aria-expanded]="documentMenu?.item?.objectId === document.objectId">⋯</button>
+                                  @if (documentMenu?.item?.objectId === document.objectId) {
+                                    <div class="document-menu" role="menu" [style.left.px]="documentMenu!.x" [style.top.px]="documentMenu!.y"
+                                      (keydown)="documentMenuKeydown($event)" (contextmenu)="$event.preventDefault(); $event.stopPropagation()">
+                                      <button type="button" role="menuitem" (click)="editDocument(document)" [disabled]="!can('record:update')">Redigera metadata</button>
+                                      <button type="button" role="menuitem" (click)="openDocument(document)">Öppna dokument</button>
+                                      <button type="button" role="menuitem" (click)="downloadDocument(document)">Ladda ned dokument</button>
+                                      <button type="button" role="menuitem" (click)="deleteDocument(document)" [disabled]="!can('record:update')">Ta bort</button>
+                                    </div>
+                                  }
+                                </td>
+                              </tr>
+                            } @empty {
+                              <tr><td class="empty-cell" colspan="5">Inga dokument har importerats.</td></tr>
+                            }
+                          </tbody>
+                        </table>
+                      </div>
+                      @if (editingDocument?.recordId === item.objectId) {
+                        <form class="editor document-form" (ngSubmit)="saveDocumentEdit()">
+                          <h4>Redigera metadata</h4>
+                          <label class="field-row"><span>Visningsnamn</span><input name="editingDocumentName" [(ngModel)]="editingDocumentName" maxlength="100" required></label>
+                          <div class="actions"><button class="button button-primary" type="submit" [disabled]="busy() || !editingDocumentName.trim()">Spara</button><button class="button button-secondary" type="button" (click)="cancelDocumentEdit()" [disabled]="busy()">Avbryt</button></div>
+                        </form>
+                      }
+                      @if (documentRecordId === item.objectId) {
+                        <form class="editor document-form" (ngSubmit)="saveDocument()">
+                          <div class="document-dropzone" [class.document-dragging]="documentDragging"
+                            (dragenter)="dragOverDocument($event)" (dragover)="dragOverDocument($event)"
+                            (dragleave)="dragLeaveDocument($event)" (drop)="dropDocument($event, documentFileInput)">
+                            <p>Dra och släpp en fil här eller välj en fil:</p>
+                            <label class="field-row"><span>Fil</span><input #documentFileInput type="file" accept=".pdf,.docx,.xlsx,.png,.jpg" (change)="selectDocumentFile(documentFileInput)" [disabled]="busy()"></label>
+                            @if (documentFile) { <p class="hint" role="status">Vald fil: {{ documentFile.name }} ({{ documentFile.size }} byte)</p> }
+                            @if (documentFileError) { <p class="document-file-error" role="alert">{{ documentFileError }}</p> }
+                          </div>
+                          <label class="field-row"><span>Namn</span><input name="documentName" [(ngModel)]="documentName" maxlength="100" required></label>
+                          <label class="field-row"><span>Dokumenttyp</span>
+                            <select name="documentType" [(ngModel)]="documentType" required>
+                              <option value="" disabled>Välj dokumenttyp</option>
+                              @for (value of valueLists()['documentType'] || []; track value) { <option [value]="value">{{ value }}</option> }
+                            </select>
+                          </label>
+                          @if (!valueLists()['documentType']) { <p class="hint">Lägg till minst ett värde i värdelistan documentType innan du importerar.</p> }
+                          <p class="hint">PDF, DOCX, XLSX, PNG eller JPG. Högst 25 MiB.</p>
+                          <div class="actions"><button class="button button-primary" type="submit" [disabled]="busy() || !documentFile || !documentName.trim() || !documentType">Importera</button><button class="button button-secondary" type="button" (click)="cancelDocument()" [disabled]="busy()">Avbryt</button></div>
+                        </form>
+                      }
+                    </div>
                     <div class="actions record-actions">
                       @if (can('record:update')) {
                       <button class="button button-secondary" type="button" (click)="editRecord(item)" [disabled]="busy() || editing">Ändra</button>

@@ -1,6 +1,9 @@
 require('dotenv').config({ quiet: true });
 
 const express = require('express');
+const multer = require('multer');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { createHash, randomBytes, randomUUID } = require('node:crypto');
 const pool = require('./db');
 const { verifyPassword } = require('./password');
@@ -11,6 +14,19 @@ const { rolePermissions, permissionsFor, userRoles, createUser, listUsers, updat
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const documentDirectory = path.resolve(__dirname, '..', '..', 'importerade dokument');
+const maxDocumentSize = 25 * 1024 * 1024;
+const uploadDocument = multer({
+  storage: multer.memoryStorage(),
+  defParamCharset: 'utf8',
+  limits: { fileSize: maxDocumentSize + 1, files: 1, fields: 2, fieldSize: 1024, parts: 3 },
+  fileFilter(_request, file, callback) {
+    if (!['.pdf', '.docx', '.xlsx', '.png', '.jpg'].includes(path.extname(file.originalname).toLowerCase())) {
+      return callback(Object.assign(new Error('Filtypen stöds inte'), { status: 400 }));
+    }
+    callback(null, true);
+  },
+}).single('file');
 
 app.use(express.json({ limit: '100kb' }));
 
@@ -57,6 +73,11 @@ async function requireObject(connection, objectId, objectType, lock = false) {
     [objectId, objectType],
   );
   if (!rows.length) fail(404, `${objectType} not found`);
+}
+
+async function requireNoDocuments(connection, recordId) {
+  const [documents] = await connection.execute('SELECT objectId FROM base_document WHERE recordId = ? LIMIT 1', [recordId]);
+  if (documents.length) fail(409, 'Handlingen innehåller dokument och kan inte tas bort');
 }
 
 function caseInput(body) {
@@ -168,12 +189,11 @@ app.post('/api/auth/login', async (request, response) => {
   response.json({ token, username: users[0].username, expiresIn: 28800 });
 });
 
-app.use('/api', async (request, _response, next) => {
-  const match = /^Bearer ([0-9a-f]{64})$/i.exec(request.get('authorization') || '');
-  if (!match) fail(401, 'Authentication required');
+async function authenticate(request, token) {
+  if (typeof token !== 'string' || !/^[0-9a-f]{64}$/i.test(token)) fail(401, 'Authentication required');
   const [users] = await pool.execute(
     `SELECT u.id, u.username FROM cassis_sessions s JOIN cassis_users u ON u.id = s.user_id
-     WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP()`, [tokenHash(match[1])],
+     WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP()`, [tokenHash(token)],
   );
   if (!users.length) fail(401, 'Session expired or invalid');
   const roles = await userRoles(pool, users[0].id);
@@ -183,7 +203,17 @@ app.use('/api', async (request, _response, next) => {
   request.userId = users[0].id;
   request.roles = roles;
   request.permissions = permissions;
-  request.token = match[1];
+  request.token = token;
+}
+
+app.post('/api/documents/:id/open', express.urlencoded({ extended: false, limit: '1kb' }), async (request, response, next) => {
+  await authenticate(request, request.body?.token);
+  await sendDocument(request, response, next, 'inline');
+});
+
+app.use('/api', async (request, _response, next) => {
+  const match = /^Bearer ([0-9a-f]{64})$/i.exec(request.get('authorization') || '');
+  await authenticate(request, match?.[1]);
   next();
 });
 
@@ -349,6 +379,9 @@ app.delete('/api/cases/:id', authorize('case:delete'), async (request, response)
       [objectId, PARENT_RELATION_TYPE],
     );
     for (const child of children) {
+      await requireNoDocuments(connection, child.objectId);
+    }
+    for (const child of children) {
       await connection.execute('DELETE FROM cassis_objects WHERE objectId = ?', [child.objectId]);
     }
     await connection.execute('DELETE FROM cassis_objects WHERE objectId = ?', [objectId]);
@@ -407,9 +440,156 @@ app.delete('/api/records/:id', authorize('record:delete'), async (request, respo
   const objectId = id(request.params.id);
   await transaction(async (connection) => {
     await requireObject(connection, objectId, 'base_record', true);
+    await requireNoDocuments(connection, objectId);
     await connection.execute('DELETE FROM cassis_objects WHERE objectId = ?', [objectId]);
   });
   response.sendStatus(204);
+});
+
+app.get('/api/documents', async (_request, response) => {
+  const [rows] = await pool.execute(
+    `SELECT o.*, d.recordId, d.name, d.documentType, d.documentType_ValueList, d.filetype, d.filesize, d.filename, d.originalFilename
+     FROM base_document d JOIN cassis_objects o ON o.objectId = d.objectId ORDER BY o.created DESC, o.objectId`,
+  );
+  response.json(rows);
+});
+
+function documentPath(document) {
+  if (!['pdf', 'docx', 'xlsx', 'png', 'jpg'].includes(document.filetype.toLowerCase())
+      || document.filename !== `${document.objectId}.${document.filetype}`) {
+    throw new Error(`Invalid stored filename for document ${document.objectId}`);
+  }
+  return path.join(documentDirectory, document.filename);
+}
+
+function documentDownloadName(document) {
+  if (document.originalFilename) return document.originalFilename;
+  const name = document.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'dokument';
+  return name.toLowerCase().endsWith(`.${document.filetype.toLowerCase()}`) ? name : `${name}.${document.filetype}`;
+}
+
+async function sendDocument(request, response, next, disposition) {
+  const objectId = id(request.params.id, 'document id');
+  const [rows] = await pool.execute('SELECT objectId, name, filename, filetype, originalFilename FROM base_document WHERE objectId = ?', [objectId]);
+  if (!rows.length) fail(404, 'Dokumentet finns inte');
+  const document = rows[0];
+  const filePath = documentPath(document);
+  await fs.access(filePath);
+  response.attachment(documentDownloadName(document));
+  if (disposition === 'inline') {
+    response.set('Content-Disposition', response.get('Content-Disposition').replace(/^attachment/, 'inline'));
+  }
+  response.type(document.filetype);
+  response.set('X-Content-Type-Options', 'nosniff');
+  response.set('Cache-Control', 'no-store');
+  response.sendFile(filePath, (error) => {
+    if (error) next(error);
+  });
+}
+
+app.get('/api/documents/:id/content', async (request, response, next) => {
+  await sendDocument(request, response, next, 'attachment');
+});
+
+app.put('/api/documents/:id', authorize('record:update'), async (request, response) => {
+  const objectId = id(request.params.id, 'document id');
+  if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
+      || Object.keys(request.body).some((key) => key !== 'name')) fail(400, 'Only name can be changed');
+  const name = text(request.body.name, 'name', 100);
+  if (!name.trim()) fail(400, 'Ange dokumentnamn');
+  await transaction(async (connection) => {
+    await requireObject(connection, objectId, 'base_document', true);
+    await connection.execute('UPDATE base_document SET name = ? WHERE objectId = ?', [name, objectId]);
+    await updateAudit(connection, objectId, request.username);
+  });
+  response.json({ objectId, name });
+});
+
+app.delete('/api/documents/:id', authorize('record:update'), async (request, response) => {
+  const objectId = id(request.params.id, 'document id');
+  let originalPath;
+  let stagedPath;
+  let staged = false;
+  try {
+    await transaction(async (connection) => {
+      const [rows] = await connection.execute('SELECT objectId, filename, filetype FROM base_document WHERE objectId = ? FOR UPDATE', [objectId]);
+      if (!rows.length) fail(404, 'Dokumentet finns inte');
+      originalPath = documentPath(rows[0]);
+      stagedPath = `${originalPath}.${randomUUID()}.deleting`;
+      await fs.rename(originalPath, stagedPath);
+      staged = true;
+      await connection.execute('DELETE FROM cassis_objects WHERE objectId = ?', [objectId]);
+    });
+  } catch (error) {
+    if (staged) {
+      try {
+        const [rows] = await pool.execute('SELECT objectId FROM base_document WHERE objectId = ?', [objectId]);
+        if (rows.length) await fs.rename(stagedPath, originalPath);
+        else await fs.unlink(stagedPath);
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `Kunde inte återställa eller ta bort dokumentfilen ${objectId}`);
+      }
+    }
+    throw error;
+  }
+  await fs.unlink(stagedPath);
+  response.sendStatus(204);
+});
+
+app.post('/api/records/:id/documents', authorize('record:update'), uploadDocument, async (request, response) => {
+  const recordId = id(request.params.id, 'record id');
+  if (!request.file) fail(400, 'Välj en fil att importera');
+  if (request.file.size > maxDocumentSize) fail(413, 'Filen får vara högst 25 MiB');
+  const name = text(request.body?.name, 'name', 100);
+  const documentType = text(request.body?.documentType, 'documentType', 100);
+  const originalFilename = text(request.file.originalname, 'originalFilename', 255);
+  if (!name.trim() || !documentType.trim()) fail(400, 'Ange dokumentnamn och dokumenttyp');
+  const objectId = randomUUID();
+  const extension = path.extname(request.file.originalname);
+  const filetype = extension.slice(1);
+  const filename = `${objectId}${extension}`;
+  const filePath = path.join(documentDirectory, filename);
+  let written = false;
+  try {
+    await transaction(async (connection) => {
+      await requireObject(connection, recordId, 'base_record', true);
+      const bindings = await getValueListBindings(connection);
+      const [values] = await connection.execute(
+        `SELECT e.objectId FROM cassis_valuelistelements e JOIN cassis_valuelists l ON l.objectId = e.listId
+         WHERE BINARY l.listName = BINARY ? AND BINARY e.value = BINARY ?`,
+        [bindings.base_document.documentType, documentType],
+      );
+      if (!values.length) fail(400, 'Dokumenttypen måste finnas i värdelistan documentType');
+      await insertObject(connection, objectId, 'base_document', request.username);
+      await connection.execute(
+        'INSERT INTO base_document (objectId, recordId, name, documentType, filetype, filesize, filename, originalFilename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [objectId, recordId, name, documentType, filetype, request.file.size, filename, originalFilename],
+      );
+      await fs.mkdir(documentDirectory, { recursive: true });
+      const file = await fs.open(filePath, 'wx');
+      written = true;
+      try {
+        await file.writeFile(request.file.buffer);
+      } finally {
+        await file.close();
+      }
+    });
+  } catch (error) {
+    if (written) {
+      try {
+        const [rows] = await pool.execute('SELECT objectId FROM base_document WHERE objectId = ?', [objectId]);
+        if (!rows.length) await fs.unlink(filePath);
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `Kunde inte kontrollera eller städa filen ${filename}`);
+      }
+    }
+    throw error;
+  }
+  const [rows] = await pool.execute(
+    `SELECT o.*, d.recordId, d.name, d.documentType, d.documentType_ValueList, d.filetype, d.filesize, d.filename, d.originalFilename
+     FROM base_document d JOIN cassis_objects o ON o.objectId = d.objectId WHERE d.objectId = ?`, [objectId],
+  );
+  response.status(201).json(rows[0]);
 });
 
 app.get('/api/relations', async (_request, response) => {
@@ -508,22 +688,29 @@ app.get('/api/search', async (request, response) => {
   const query = request.query.q;
   if (typeof query !== 'string' || !query.trim() || query.length > 255) fail(400, 'q must be between 1 and 255 characters');
   const [rows] = await pool.execute(
-    `SELECT o.objectId, o.objectType, o.created, o.createdBy, COALESCE(c.diaryNumber, r.name) AS label,
-       c.diaryNumber, c.caseSentence, r.name, r.recordType
+    `SELECT o.objectId, o.objectType, o.created, o.createdBy, COALESCE(c.diaryNumber, r.name, d.name) AS label,
+       c.diaryNumber, c.caseSentence, COALESCE(r.name, d.name) AS name, r.recordType,
+       d.recordId, d.documentType, d.filetype, d.filesize, d.filename, d.originalFilename
      FROM cassis_objects o
      LEFT JOIN base_case c ON c.objectId = o.objectId
      LEFT JOIN base_record r ON r.objectId = o.objectId
+     LEFT JOIN base_document d ON d.objectId = o.objectId
      LEFT JOIN cassis_relations p ON p.id = r.objectId AND p.targetId = r.objectId AND p.relationType = ?
-     WHERE o.objectType IN ('base_case', 'base_record') AND (LOCATE(?, CONCAT_WS(' ', o.objectId, o.objectType, o.created, o.createdBy, o.lastUpdated,
+     WHERE o.objectType IN ('base_case', 'base_record', 'base_document') AND (LOCATE(?, CONVERT(CONCAT_WS(' ', o.objectId, o.objectType, o.created, o.createdBy, o.lastUpdated,
        o.lastUpdatedBy, c.diaryNumber, c.classification, c.caseSentence,
-       p.sourceId, r.name, r.description, r.recordType)) > 0
-       OR EXISTS (SELECT 1 FROM case_extraclass e WHERE e.caseId = o.objectId AND LOCATE(?, e.value) > 0))
-     ORDER BY o.created DESC, o.objectId`, [PARENT_RELATION_TYPE, query.trim(), query.trim()],
+       p.sourceId, r.name, r.description, r.recordType, d.recordId, d.name, d.documentType, d.filetype, d.filesize, d.filename) USING utf8mb4) COLLATE utf8mb4_general_ci) > 0
+       OR LOCATE(?, d.originalFilename COLLATE utf8mb4_general_ci) > 0
+       OR EXISTS (SELECT 1 FROM case_extraclass e WHERE e.caseId = o.objectId AND LOCATE(?, CONVERT(e.value USING utf8mb4) COLLATE utf8mb4_general_ci) > 0))
+     ORDER BY o.created DESC, o.objectId`, [PARENT_RELATION_TYPE, query.trim(), query.trim(), query.trim()],
   );
   response.json(rows);
 });
 
-app.use((error, _request, response, _next) => {
+app.use((error, _request, response, next) => {
+  if (response.headersSent) return next(error);
+  if (error instanceof multer.MulterError) {
+    error.status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+  }
   if (!error.status || error.status >= 500) console.error('API error:', error);
   response.status(error.status || 500).json({ error: error.status && error.status < 500 ? error.message : 'Internal server error' });
 });

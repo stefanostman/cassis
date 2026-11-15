@@ -25,6 +25,17 @@ interface RecordItem extends BaseObject {
   recordType: string;
 }
 
+interface DocumentItem {
+  objectId: string;
+  recordId: string;
+  name: string;
+  documentType: string;
+  filetype: string;
+  filesize: number;
+  filename: string;
+  originalFilename: string | null;
+}
+
 interface Relation {
   id: string;
   sourceId: string;
@@ -36,13 +47,19 @@ interface Relation {
 
 interface SearchResult {
   objectId: string;
-  objectType: 'base_case' | 'base_record';
+  objectType: 'base_case' | 'base_record' | 'base_document';
   created: string;
   createdBy: string;
   diaryNumber: string | null;
   caseSentence: string | null;
   name: string | null;
   recordType: string | null;
+  recordId: string | null;
+  documentType: string | null;
+  filetype: string | null;
+  filesize: number | null;
+  filename: string | null;
+  originalFilename: string | null;
 }
 
 interface LoginResponse {
@@ -58,6 +75,7 @@ interface ValueListEntry {
 interface ValueListBindings {
   base_case: { classification: string; extraclass: string };
   base_record: { recordType: string };
+  base_document: { documentType: string };
 }
 
 interface CurrentUser {
@@ -104,6 +122,7 @@ export class App {
   protected readonly busy = signal(false);
   protected readonly cases = signal<Case[]>([]);
   protected readonly records = signal<RecordItem[]>([]);
+  protected readonly documents = signal<DocumentItem[]>([]);
   protected readonly relations = signal<Relation[]>([]);
   protected readonly valueLists = signal<Record<string, string[]>>({});
   protected readonly availableRoles = signal<string[]>([]);
@@ -140,6 +159,15 @@ export class App {
   protected caseForm = this.emptyCase();
   protected caseExtraValues: string[] = [];
   protected recordForm = this.emptyRecord();
+  protected documentRecordId = '';
+  protected documentName = '';
+  protected documentType = '';
+  protected documentFile: File | null = null;
+  protected documentFileError = '';
+  protected documentDragging = false;
+  protected documentMenu: { item: DocumentItem; x: number; y: number } | null = null;
+  protected editingDocument: DocumentItem | null = null;
+  protected editingDocumentName = '';
   protected relationForm = { sourceId: '', targetId: '', relationType: '' };
   protected selectedRelation: Relation | null = null;
   protected newUsername = '';
@@ -164,7 +192,7 @@ export class App {
   }
 
   protected get editing(): boolean {
-    return this.caseMode !== 'view' || this.recordMode !== 'view';
+    return this.caseMode !== 'view' || this.recordMode !== 'view' || Boolean(this.documentRecordId || this.editingDocument);
   }
 
   protected toggleMenu(menu: Menu): void {
@@ -174,6 +202,12 @@ export class App {
   @HostListener('document:click')
   protected closeMenu(): void {
     this.openMenu = null;
+    this.documentMenu = null;
+  }
+
+  @HostListener('document:keydown.escape')
+  protected closeDocumentMenu(): void {
+    this.documentMenu = null;
   }
 
   protected menuFocusOut(event: FocusEvent): void {
@@ -227,11 +261,12 @@ export class App {
   private async request<T>(path: string, method = 'GET', body?: object): Promise<T> {
     const headers: Record<string, string> = {};
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
-    if (body) headers['Content-Type'] = 'application/json';
+    const formData = body instanceof FormData;
+    if (body && !formData) headers['Content-Type'] = 'application/json';
     const response = await fetch(`/api${path}`, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? formData ? body : JSON.stringify(body) : undefined,
     });
     if (!response.ok) {
       if (response.status === 401 && path !== '/auth/login') this.clearSession();
@@ -286,6 +321,7 @@ export class App {
     sessionStorage.removeItem('cassisUsername');
     this.cases.set([]);
     this.records.set([]);
+    this.documents.set([]);
     this.relations.set([]);
     this.valueLists.set({});
     this.availableRoles.set([]);
@@ -308,6 +344,10 @@ export class App {
     this.caseForm = this.emptyCase();
     this.caseExtraValues = [];
     this.recordForm = this.emptyRecord();
+    this.cancelDocument();
+    this.editingDocument = null;
+    this.editingDocumentName = '';
+    this.documentMenu = null;
     this.relationForm = { sourceId: '', targetId: '', relationType: '' };
     this.selectedRelation = null;
     this.searchQuery = '';
@@ -326,9 +366,10 @@ export class App {
 
   private async refresh(): Promise<void> {
     const previousRecordCount = this.caseRecords().length;
-    const [cases, records, relations, valueListEntries, bindings, currentUser] = await Promise.all([
+    const [cases, records, documents, relations, valueListEntries, bindings, currentUser] = await Promise.all([
       this.request<Case[]>('/cases'),
       this.request<RecordItem[]>('/records'),
+      this.request<DocumentItem[]>('/documents'),
       this.request<Relation[]>('/relations'),
       this.request<ValueListEntry[]>('/value-lists'),
       this.request<ValueListBindings>('/value-list-bindings'),
@@ -339,7 +380,7 @@ export class App {
       (listsByName[entry.listName] ||= []).push(entry.value);
     }
     const valueLists: Record<string, string[]> = Object.create(null);
-    for (const [field, listName] of Object.entries({ ...bindings.base_case, ...bindings.base_record })) {
+    for (const [field, listName] of Object.entries({ ...bindings.base_case, ...bindings.base_record, ...bindings.base_document })) {
       if (listsByName[listName]) valueLists[field] = listsByName[listName];
     }
     for (const values of Object.values(valueLists)) values.sort((a, b) => a.localeCompare(b, 'sv'));
@@ -352,6 +393,7 @@ export class App {
     }
     this.cases.set(cases);
     this.records.set(records);
+    this.documents.set(documents);
     this.setRelations(relations, previousRecordCount);
     this.valueLists.set(valueLists);
     this.availableRoles.set((listsByName['userRole'] || []).sort((a, b) => a.localeCompare(b, 'sv')));
@@ -444,8 +486,9 @@ export class App {
   protected async addListValue(): Promise<void> {
     const list = this.selectedValueList;
     if (!list) return;
-    if (!list.values.length && list.boundFields.length &&
-        !confirm(`Listan används av ${list.boundFields.join(', ')}. Det första värdet aktiverar validering och befintliga värden utanför listan måste ändras innan objekten kan sparas. Fortsätta?`)) return;
+    const fieldsWithFreeText = list.boundFields.filter((field) => field !== 'base_document.documentType');
+    if (!list.values.length && fieldsWithFreeText.length &&
+        !confirm(`Listan används av ${fieldsWithFreeText.join(', ')}. Det första värdet aktiverar validering och befintliga värden utanför listan måste ändras innan objekten kan sparas. Fortsätta?`)) return;
     this.valueListMessage.set('');
     await this.run(async () => {
       const value = await this.request<ValueListElement>(`/value-list-definitions/${list.objectId}/values`, 'POST', { value: this.listValue });
@@ -556,6 +599,13 @@ export class App {
       }
     } else if (result.objectType === 'base_record') {
       const item = this.records().find((entry) => entry.objectId === result.objectId);
+      if (item && this.cases().some((entry) => entry.objectId === item.caseId)) {
+        this.selectRecord(item);
+        return;
+      }
+    } else if (result.objectType === 'base_document') {
+      const document = this.documents().find((entry) => entry.objectId === result.objectId);
+      const item = this.records().find((entry) => entry.objectId === document?.recordId);
       if (item && this.cases().some((entry) => entry.objectId === item.caseId)) {
         this.selectRecord(item);
         return;
@@ -692,6 +742,204 @@ export class App {
       openIds.delete(item.objectId);
       this.openRecordIds.set(openIds);
       await this.refresh();
+      await this.refreshSearch();
+    });
+  }
+
+  protected documentsFor(recordId: string): DocumentItem[] {
+    return this.documents().filter((document) => document.recordId === recordId);
+  }
+
+  protected showDocumentMenu(event: MouseEvent, item: DocumentItem): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.busy() || this.editing) return;
+    const target = event.currentTarget;
+    const rect = target instanceof HTMLElement ? target.getBoundingClientRect() : null;
+    const x = event.clientX || rect?.left || 0;
+    const y = event.clientY || rect?.bottom || 0;
+    this.documentMenu = {
+      item,
+      x: Math.max(0, Math.min(x, window.innerWidth - 210)),
+      y: Math.max(0, Math.min(y, window.innerHeight - 190)),
+    };
+    setTimeout(() => document.querySelector<HTMLButtonElement>('.document-menu button:not(:disabled)')?.focus());
+  }
+
+  protected documentMenuKeydown(event: KeyboardEvent): void {
+    if (!(event.currentTarget instanceof HTMLElement)) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.parentElement?.querySelector<HTMLButtonElement>('.document-menu-trigger')?.focus();
+      this.documentMenu = null;
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+    if (!buttons.length) return;
+    const index = buttons.findIndex((button) => button === document.activeElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+      : event.key === 'ArrowDown' ? (index + 1) % buttons.length : (index - 1 + buttons.length) % buttons.length;
+    buttons[next].focus();
+  }
+
+  protected editDocument(item: DocumentItem): void {
+    this.documentMenu = null;
+    this.editingDocument = item;
+    this.editingDocumentName = item.name;
+  }
+
+  protected cancelDocumentEdit(): void {
+    this.editingDocument = null;
+    this.editingDocumentName = '';
+  }
+
+  protected async saveDocumentEdit(): Promise<void> {
+    const item = this.editingDocument;
+    if (!item) return;
+    await this.run(async () => {
+      const updated = await this.request<{ objectId: string; name: string }>(`/documents/${item.objectId}`, 'PUT',
+        { name: this.editingDocumentName });
+      this.documents.update((documents) => documents.map((document) =>
+        document.objectId === updated.objectId ? { ...document, name: updated.name } : document));
+      this.cancelDocumentEdit();
+      await this.refreshSearch();
+    });
+  }
+
+  protected openDocument(item: DocumentItem): void {
+    this.documentMenu = null;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = `/api/documents/${encodeURIComponent(item.objectId)}/open`;
+    form.target = '_blank';
+    form.rel = 'noopener noreferrer';
+    const token = document.createElement('input');
+    token.type = 'hidden';
+    token.name = 'token';
+    token.value = this.token;
+    form.appendChild(token);
+    document.body.appendChild(form);
+    try {
+      form.submit();
+    } finally {
+      form.remove();
+    }
+  }
+
+  protected async downloadDocument(item: DocumentItem): Promise<void> {
+    this.documentMenu = null;
+    await this.run(async () => {
+      const response = await fetch(`/api/documents/${encodeURIComponent(item.objectId)}/content`, {
+        headers: { Authorization: `Bearer ${this.token}` },
+      });
+      if (!response.ok) {
+        if (response.status === 401) this.clearSession();
+        const payload: { error?: string } = await response.json();
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      const name = item.originalFilename || this.legacyDocumentFilename(item);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    });
+  }
+
+  private legacyDocumentFilename(item: DocumentItem): string {
+    const name = item.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'dokument';
+    return name.toLowerCase().endsWith(`.${item.filetype.toLowerCase()}`) ? name : `${name}.${item.filetype}`;
+  }
+
+  protected async deleteDocument(item: DocumentItem): Promise<void> {
+    this.documentMenu = null;
+    if (!confirm(`Ta bort dokumentet ${item.name}? Filen tas också bort.`)) return;
+    await this.run(async () => {
+      await this.request(`/documents/${item.objectId}`, 'DELETE');
+      this.documents.update((documents) => documents.filter((document) => document.objectId !== item.objectId));
+      await this.refreshSearch();
+    });
+  }
+
+  protected importDocument(item: RecordItem): void {
+    this.documentRecordId = item.objectId;
+    this.documentName = '';
+    this.documentType = '';
+    this.documentFile = null;
+    this.documentFileError = '';
+    this.documentDragging = false;
+  }
+
+  protected selectDocumentFile(input: HTMLInputElement): void {
+    this.setDocumentFiles(Array.from(input.files ?? []), input);
+  }
+
+  protected dragOverDocument(event: DragEvent): void {
+    event.preventDefault();
+    if (!this.busy()) this.documentDragging = true;
+  }
+
+  protected dragLeaveDocument(event: DragEvent): void {
+    if (event.currentTarget instanceof HTMLElement && event.relatedTarget instanceof Node
+        && event.currentTarget.contains(event.relatedTarget)) return;
+    this.documentDragging = false;
+  }
+
+  protected dropDocument(event: DragEvent, input: HTMLInputElement): void {
+    event.preventDefault();
+    this.documentDragging = false;
+    if (this.busy()) return;
+    input.value = '';
+    this.setDocumentFiles(Array.from(event.dataTransfer?.files ?? []), input);
+  }
+
+  private setDocumentFiles(files: File[], input: HTMLInputElement): void {
+    this.documentFile = null;
+    this.documentFileError = '';
+    if (!files.length) {
+      input.value = '';
+      this.documentFileError = 'Välj eller släpp en fil.';
+    } else if (files.length > 1) {
+      input.value = '';
+      this.documentFileError = 'Välj bara en fil åt gången.';
+    } else if (!/\.(pdf|docx|xlsx|png|jpg)$/i.test(files[0].name)) {
+      input.value = '';
+      this.documentFileError = 'Filtypen stöds inte. Välj PDF, DOCX, XLSX, PNG eller JPG.';
+    } else if (files[0].size > 25 * 1024 * 1024) {
+      input.value = '';
+      this.documentFileError = 'Filen får vara högst 25 MiB.';
+    } else {
+      this.documentFile = files[0];
+    }
+  }
+
+  protected cancelDocument(): void {
+    this.documentRecordId = '';
+    this.documentName = '';
+    this.documentType = '';
+    this.documentFile = null;
+    this.documentFileError = '';
+    this.documentDragging = false;
+  }
+
+  protected async saveDocument(): Promise<void> {
+    const file = this.documentFile;
+    if (!file || !this.documentRecordId) return;
+    await this.run(async () => {
+      if (file.size > 25 * 1024 * 1024) throw new Error('Filen får vara högst 25 MiB.');
+      const body = new FormData();
+      body.append('file', file);
+      body.append('name', this.documentName);
+      body.append('documentType', this.documentType);
+      const document = await this.request<DocumentItem>(`/records/${this.documentRecordId}/documents`, 'POST', body);
+      this.documents.update((documents) => [document, ...documents]);
+      this.cancelDocument();
       await this.refreshSearch();
     });
   }

@@ -18,6 +18,7 @@ tags:
   - name: Användare
   - name: Ärenden
   - name: Handlingar
+  - name: Dokument
   - name: Relationer
   - name: Värdelistor
   - name: Sök
@@ -304,7 +305,7 @@ paths:
     delete:
       tags: [Ärenden]
       summary: Ta bort ärende
-      description: Kräver `case:delete`. Ärendets handlingar och berörda relationer tas också bort.
+      description: Kräver `case:delete`. Ärendets handlingar och berörda relationer tas också bort, men borttagningen stoppas om en handling har dokument.
       responses:
         '204':
           description: Ärendet har tagits bort
@@ -316,6 +317,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
   /records:
@@ -409,7 +412,7 @@ paths:
     delete:
       tags: [Handlingar]
       summary: Ta bort handling
-      description: Kräver rättigheten `record:delete`. Berörda relationer tas också bort.
+      description: Kräver `record:delete`. Berörda relationer tas också bort. En handling med dokument kan inte tas bort.
       responses:
         '204':
           description: Handlingen har tagits bort
@@ -421,6 +424,192 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /documents:
+    get:
+      tags: [Dokument]
+      summary: Lista dokumentens metadata
+      responses:
+        '200':
+          description: Dokument
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Document'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /documents/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [Dokument]
+      summary: Ändra dokumentets visningsnamn
+      description: Kräver `record:update`. Övriga metadata kan inte ändras.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                  description: Får inte bestå enbart av blanksteg.
+      responses:
+        '200':
+          description: Uppdaterat visningsnamn
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [objectId, name]
+                properties:
+                  objectId:
+                    $ref: '#/components/schemas/Uuid'
+                  name:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Dokument]
+      summary: Ta bort dokumentet och dess fil
+      description: Kräver `record:update`.
+      responses:
+        '204':
+          description: Dokumentet och dess fil har tagits bort.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /documents/{id}/content:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Dokument]
+      summary: Ladda ned dokumentfil
+      responses:
+        '200':
+          $ref: '#/components/responses/DocumentFile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /documents/{id}/open:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Dokument]
+      summary: Öppna dokumentfil i webbläsaren
+      description: Sessionstoken skickas i formuläret för att en ny flik ska kunna visa filen.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  description: Sessionstoken från inloggningen.
+      responses:
+        '200':
+          $ref: '#/components/responses/DocumentFile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /records/{id}/documents:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Dokument]
+      summary: Importera ett dokument till en handling
+      description: |
+        Kräver `record:update`. Tillåtna filändelser är pdf, docx, xlsx, png
+        och jpg; filinnehållet kontrolleras inte mot ändelsen. Högsta filstorlek
+        är 25 MiB och originalfilnamnet får innehålla högst 255 tecken.
+        Dokumenttypen måste finnas i värdelistan documentType.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name, documentType]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: Får inte bestå enbart av blanksteg.
+                documentType:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+      responses:
+        '201':
+          description: Dokumentet har importerats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Filen är större än 25 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
   /relations:
@@ -667,7 +856,8 @@ paths:
   /search:
     get:
       tags: [Sök]
-      summary: Sök i ärenden och handlingar
+      summary: Sök i ärenden, handlingar och dokumentens metadata
+      description: Söker inte i dokumentfilernas innehåll.
       parameters:
         - in: query
           name: q
@@ -728,6 +918,17 @@ components:
           schema:
             $ref: '#/components/schemas/RelationInput'
   responses:
+    DocumentFile:
+      description: Filens innehåll med Content-Disposition och originalfilnamn; äldre dokument använder visningsnamn och filändelse.
+      headers:
+        Content-Disposition:
+          schema:
+            type: string
+      content:
+        '*/*':
+          schema:
+            type: string
+            format: binary
     BadRequest:
       description: Ogiltig indata, inklusive ogiltigt UUID eller värde som inte finns i en aktiv värdelista.
       content:
@@ -962,6 +1163,34 @@ components:
           properties:
             recordType_ValueList:
               type: string
+    Document:
+      allOf:
+        - $ref: '#/components/schemas/AuditFields'
+        - type: object
+          required: [recordId, name, documentType, documentType_ValueList, filetype, filesize, filename, originalFilename]
+          properties:
+            recordId:
+              $ref: '#/components/schemas/Uuid'
+            name:
+              type: string
+            documentType:
+              type: string
+            documentType_ValueList:
+              type: string
+            filetype:
+              type: string
+              description: Originalfilens ändelse utan punkt.
+            filesize:
+              type: integer
+              description: Filens storlek i byte.
+            filename:
+              type: string
+              description: Dokumentets UUID och originalfilens ändelse.
+            originalFilename:
+              type: string
+              nullable: true
+              maxLength: 255
+              description: Ursprungligt filnamn; null för dokument som importerades innan fältet infördes.
     RelationInput:
       type: object
       required: [sourceId, targetId]
@@ -1004,7 +1233,7 @@ components:
           type: string
     ValueListBindings:
       type: object
-      required: [base_case, base_record]
+      required: [base_case, base_record, base_document]
       properties:
         base_case:
           type: object
@@ -1023,6 +1252,13 @@ components:
             recordType:
               type: string
               example: recordType
+        base_document:
+          type: object
+          required: [documentType]
+          properties:
+            documentType:
+              type: string
+              example: documentType
     ValueListCreate:
       type: object
       required: [listName, listDescription]
@@ -1095,13 +1331,13 @@ components:
             $ref: '#/components/schemas/ValueListElement'
     SearchResult:
       type: object
-      required: [objectId, objectType, created, createdBy, label, diaryNumber, caseSentence, name, recordType]
+      required: [objectId, objectType, created, createdBy, label, diaryNumber, caseSentence, name, recordType, recordId, documentType, filetype, filesize, filename, originalFilename]
       properties:
         objectId:
           $ref: '#/components/schemas/Uuid'
         objectType:
           type: string
-          enum: [base_case, base_record]
+          enum: [base_case, base_record, base_document]
         created:
           type: string
           description: UTC-tid från MySQL.
@@ -1120,5 +1356,24 @@ components:
           type: string
           nullable: true
         recordType:
+          type: string
+          nullable: true
+        recordId:
+          type: string
+          format: uuid
+          nullable: true
+        documentType:
+          type: string
+          nullable: true
+        filetype:
+          type: string
+          nullable: true
+        filesize:
+          type: integer
+          nullable: true
+        filename:
+          type: string
+          nullable: true
+        originalFilename:
           type: string
           nullable: true

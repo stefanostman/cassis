@@ -7,6 +7,7 @@ async function getValueListBindings(connection) {
        (TABLE_NAME = 'base_case' AND COLUMN_NAME IN ('classification_ValueList', 'extraclass_ValueList'))
        OR (TABLE_NAME = 'case_extraclass' AND COLUMN_NAME = 'value_ValueList')
        OR (TABLE_NAME = 'base_record' AND COLUMN_NAME = 'recordType_ValueList')
+       OR (TABLE_NAME = 'base_document' AND COLUMN_NAME = 'documentType_ValueList')
      )`,
   );
   function reference(table, column) {
@@ -23,6 +24,7 @@ async function getValueListBindings(connection) {
   return {
     base_case: { classification, extraclass },
     base_record: { recordType: reference('base_record', 'recordType_ValueList') },
+    base_document: { documentType: reference('base_document', 'documentType_ValueList') },
   };
 }
 
@@ -56,6 +58,7 @@ function valueListConstraints(listName, bindings) {
     { listName: bindings.base_case.classification, field: 'base_case.classification', max: 8 },
     { listName: bindings.base_case.extraclass, field: 'base_case.extraclass', max: 50 },
     { listName: bindings.base_record.recordType, field: 'base_record.recordType', max: 100 },
+    { listName: bindings.base_document.documentType, field: 'base_document.documentType', max: 100 },
   ].filter((entry) => entry.listName === listName);
   return {
     boundFields: fields.map((entry) => entry.field),

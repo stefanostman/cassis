@@ -9,7 +9,7 @@ async function insertAudit(connection, objectId, type) {
 }
 
 async function seedValueLists(connection) {
-  for (const name of ['classification', 'extraClass', 'recordType', 'userRole']) {
+  for (const name of ['classification', 'extraClass', 'recordType', 'documentType', 'userRole']) {
     const [existing] = await connection.execute('SELECT objectId FROM cassis_valuelists WHERE BINARY listName = BINARY ?', [name]);
     let listId;
     if (existing.length) {

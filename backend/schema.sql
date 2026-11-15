@@ -78,6 +78,21 @@ CREATE TABLE IF NOT EXISTS base_record (
   FOREIGN KEY (objectId) REFERENCES cassis_objects(objectId) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS base_document (
+  objectId CHAR(36) PRIMARY KEY,
+  recordId CHAR(36) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  documentType VARCHAR(100) NOT NULL,
+  documentType_ValueList VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT 'documentType',
+  filetype VARCHAR(4) NOT NULL,
+  filesize INT UNSIGNED NOT NULL,
+  filename VARCHAR(41) NOT NULL,
+  originalFilename VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
+  CONSTRAINT chk_document_type_list CHECK (BINARY documentType_ValueList = BINARY 'documentType'),
+  FOREIGN KEY (objectId) REFERENCES cassis_objects(objectId) ON DELETE CASCADE,
+  FOREIGN KEY (recordId) REFERENCES base_record(objectId) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS cassis_relations (
   id CHAR(36) PRIMARY KEY,
   sourceId CHAR(36) NOT NULL,

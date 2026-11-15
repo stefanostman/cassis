@@ -20,6 +20,7 @@ test('authenticated API returns value lists and enforces them on case and record
     { TABLE_NAME: 'base_case', COLUMN_NAME: 'extraclass_ValueList', COLUMN_DEFAULT: 'extraClass' },
     { TABLE_NAME: 'case_extraclass', COLUMN_NAME: 'value_ValueList', COLUMN_DEFAULT: 'extraClass' },
     { TABLE_NAME: 'base_record', COLUMN_NAME: 'recordType_ValueList', COLUMN_DEFAULT: 'recordType' },
+    { TABLE_NAME: 'base_document', COLUMN_NAME: 'documentType_ValueList', COLUMN_DEFAULT: 'documentType' },
   ];
   let writes = 0;
   const originalExecute = pool.execute;
@@ -69,6 +70,7 @@ test('authenticated API returns value lists and enforces them on case and record
     assert.deepEqual(bindings.body, {
       base_case: { classification: 'classification', extraclass: 'extraClass' },
       base_record: { recordType: 'recordType' },
+      base_document: { documentType: 'documentType' },
     });
     const caseData = { diaryNumber: '1', classification: 'A', caseSentence: 'Ärende', extraclass: ['ett'] };
     const recordData = { caseId, name: 'Handling', description: '', recordType: 'Brev' };

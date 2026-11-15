@@ -86,6 +86,7 @@ test('authenticated CRUD, search, relations and cascading deletion', async () =>
     assert.deepEqual((await request('/value-list-bindings')).body, {
       base_case: { classification: 'classification', extraclass: 'extraClass' },
       base_record: { recordType: 'recordType' },
+      base_document: { documentType: 'documentType' },
     });
     const [invalidAudits] = await pool.query(
       `SELECT l.objectId FROM cassis_valuelists l LEFT JOIN cassis_objects o ON o.objectId = l.objectId
@@ -96,7 +97,7 @@ test('authenticated CRUD, search, relations and cascading deletion', async () =>
     );
     assert.deepEqual(invalidAudits, []);
     assert.equal((await request('/search?q=cassis_valuelist')).body.every((row) =>
-      ['base_case', 'base_record'].includes(row.objectType)), true);
+      ['base_case', 'base_record', 'base_document'].includes(row.objectType)), true);
 
     const listName = `${username}_list`;
     const createdList = await request('/value-list-definitions', 'POST', { listName, listDescription: 'Beskrivning' });
