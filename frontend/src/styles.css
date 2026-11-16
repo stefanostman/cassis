@@ -1,58 +1,70 @@
 body { margin: 0; }
+app-root .conversation { padding: .6rem; font-size: .8rem; overflow-wrap: anywhere; }
+app-root .conversation h2 { margin-bottom: .6rem; font-size: .95rem; letter-spacing: 0; }
+app-root .conversation-hint, app-root .conversation-error { margin: 0 0 .5rem; }
+app-root .conversation-error { color: #a23131; }
+app-root .conversation-posts { display: grid; gap: .4rem; max-height: 60vh; overflow-y: auto; margin-bottom: .4rem; }
+app-root .conversation-post { min-width: 0; padding: .45rem; border-radius: 6px; background: white; }
+app-root .conversation-post-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .2rem .4rem; padding-bottom: .25rem; margin-bottom: .3rem; border-bottom: 1px solid var(--cassis); }
+app-root .conversation-post-header time { font-size: .7rem; }
+app-root .conversation-text { margin: 0 0 .35rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+app-root .conversation textarea { min-height: 4rem; padding: .3rem; font-size: .8rem; }
+app-root .conversation .button { padding: .25rem .4rem; font-size: .75rem; }
+app-root .conversation-actions { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .25rem; }
 app-root .button, app-root .record-toggle, app-root .result-link { font: inherit; cursor: pointer; }
-app-root .button { border: 1px solid var(--cassis); border-radius: 8px; padding: .6rem .9rem; background: var(--cassis); color: white; font-size: .9rem; font-weight: 600; }
+app-root .button { border: 1px solid var(--cassis-border); border-radius: 8px; padding: .6rem .9rem; background: var(--cassis); color: white; font-size: .9rem; font-weight: 600; }
 app-root .button:hover:not(:disabled) { background: var(--cassis-hover); }
 app-root button:disabled { cursor: not-allowed; opacity: .5; }
 app-root :is(button, input, textarea, select, summary):focus-visible { outline: 3px solid #72b8bd; outline-offset: 2px; }
 app-root .search-panel table { min-width: 900px; }
-app-root .record-list-heading { margin: 0 0 .75rem; color: #405d70; font-size: .9rem; font-weight: 700; }
+app-root .record-list-heading { margin: 0 0 .75rem; color: var(--cassis); font-size: .9rem; font-weight: 700; }
 app-root .record-list { display: grid; gap: .6rem; }
-app-root .record-item { overflow: hidden; border: 1px solid var(--cassis); border-radius: 9px; }
+app-root .record-item { overflow: hidden; border: 1px solid var(--cassis-border); border-radius: 9px; }
 app-root .record-item h3 { margin: 0; }
 app-root .record-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 1rem; border: 0; padding: .55rem 1rem; background: var(--cassis); color: white; font-weight: 700; text-align: left; }
 app-root .record-toggle:hover:not(:disabled), app-root .record-toggle[aria-expanded="true"] { background: var(--cassis-hover); }
 app-root .record-toggle-meta { display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .35rem .75rem; }
 app-root .record-toggle-icon { width: 1.4rem; text-align: center; color: white; font-size: 1.3rem; }
-app-root .record-content { padding: .65rem 1rem; border-top: 1px solid var(--cassis); }
+app-root .record-content { padding: .65rem 1rem; border-top: 1px solid var(--cassis-border); }
 app-root .record-content h4, app-root .record-create h3 { margin: 0 0 .75rem; }
 app-root .record-actions { margin-bottom: 1rem; }
 app-root .document-section { margin-bottom: 1rem; }
 app-root .document-heading { margin-bottom: .6rem; }
 app-root .record-content .document-heading h4 { margin: 0; }
 app-root .document-form { margin-top: .75rem; }
-app-root .document-dropzone { display: grid; gap: .55rem; padding: .8rem; border: 2px dashed var(--cassis); border-radius: 8px; background: #f8fafb; }
+app-root .document-dropzone { display: grid; gap: .55rem; padding: .8rem; border: 2px dashed var(--cassis-border); border-radius: 8px; background: #f8fafb; }
 app-root .document-dropzone.document-dragging { background: #e9f4f3; }
-app-root input[type="file"]::file-selector-button { border: 1px solid var(--cassis); border-radius: 5px; background: var(--cassis); color: white; font: inherit; cursor: pointer; }
+app-root input[type="file"]::file-selector-button { border: 1px solid var(--cassis-border); border-radius: 5px; background: var(--cassis); color: white; font: inherit; cursor: pointer; }
 app-root input[type="file"]:not(:disabled)::file-selector-button:hover { background: var(--cassis-hover); }
 app-root .document-file-error { color: #a23131; font-size: .86rem; }
 app-root .document-menu-trigger { border: 0; border-radius: 4px; background: var(--cassis); color: white; font: inherit; font-size: 1.3rem; cursor: pointer; }
 app-root .document-menu-trigger:hover:not(:disabled) { background: var(--cassis-hover); }
-app-root .document-menu { position: fixed; z-index: 20; min-width: 200px; padding: .3rem; background: white; border: 1px solid var(--cassis); border-radius: 7px; box-shadow: 0 5px 20px #1e3c5033; }
+app-root .document-menu { position: fixed; z-index: 20; min-width: 200px; padding: .3rem; background: white; border: 1px solid var(--cassis-border); border-radius: 7px; box-shadow: 0 5px 20px #1e3c5033; }
 app-root .document-menu button { display: block; width: 100%; padding: .45rem .65rem; border: 0; border-radius: 4px; background: var(--cassis); color: white; font: inherit; text-align: left; cursor: pointer; }
 app-root .document-menu button:hover:not(:disabled), app-root .document-menu button:focus-visible { background: var(--cassis-hover); }
-app-root .record-create { margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--cassis); border-radius: 9px; }
-app-root .user-roles { display: flex; flex-wrap: wrap; gap: .75rem; border: 1px solid var(--cassis); border-radius: 7px; padding: .6rem .75rem; }
-app-root .user-roles legend { color: #405d70; font-size: .87rem; font-weight: 700; }
+app-root .record-create { margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--cassis-border); border-radius: 9px; }
+app-root .user-roles { display: flex; flex-wrap: wrap; gap: .75rem; border: 1px solid var(--cassis-border); border-radius: 7px; padding: .6rem .75rem; }
+app-root .user-roles legend { color: var(--cassis); font-size: .87rem; font-weight: 700; }
 app-root .user-roles label { display: flex; align-items: center; gap: .3rem; }
 app-root .user-roles input { width: auto; }
-app-root .user-list { display: grid; gap: 1px; max-height: 14rem; overflow-y: auto; margin: 1rem 0; border: 1px solid var(--cassis); border-radius: 7px; }
-app-root .user-list-item { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem .75rem; width: 100%; padding: .4rem .65rem; border: 0; border-bottom: 1px solid var(--cassis); background: var(--cassis); color: white; font: inherit; text-align: left; cursor: pointer; }
+app-root .user-list { display: grid; gap: 1px; max-height: 14rem; overflow-y: auto; margin: 1rem 0; border: 1px solid var(--cassis-border); border-radius: 7px; }
+app-root .user-list-item { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem .75rem; width: 100%; padding: .4rem .65rem; border: 0; border-bottom: 1px solid var(--cassis-border); background: var(--cassis); color: white; font: inherit; text-align: left; cursor: pointer; }
 app-root .user-list-item:last-child { border-bottom: 0; }
 app-root .user-list-item strong, app-root .user-list-item span { min-width: 0; overflow-wrap: anywhere; }
 app-root .user-list-item:hover:not(:disabled), app-root .user-list-item[aria-pressed="true"] { background: var(--cassis-hover); }
 app-root .user-list-item span { color: white; font-size: .85rem; }
 app-root .user-list > .hint { padding: .5rem .65rem; }
 app-root .user-form-title { margin-top: 1rem; }
-app-root .value-list-values { max-height: 12rem; overflow-y: auto; margin: .75rem 0; padding: 0; list-style: none; border: 1px solid var(--cassis); border-radius: 7px; }
-app-root .value-list-values li { padding: .35rem .65rem; border-bottom: 1px solid var(--cassis); overflow-wrap: anywhere; }
+app-root .value-list-values { max-height: 12rem; overflow-y: auto; margin: .75rem 0; padding: 0; list-style: none; border: 1px solid var(--cassis-border); border-radius: 7px; }
+app-root .value-list-values li { padding: .35rem .65rem; border-bottom: 1px solid var(--cassis-border); overflow-wrap: anywhere; }
 app-root .value-list-values li:last-child { border-bottom: 0; }
-app-root .panel.main-menu { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0 .6rem; background: var(--cassis); border-color: var(--cassis); }
+app-root .panel.main-menu { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0 .6rem; background: var(--cassis); border-color: var(--cassis-border); }
 app-root .main-menu details { position: relative; }
 app-root .main-menu summary { list-style: none; padding: 0 .9rem; border-radius: 7px; color: white; }
 app-root .main-menu summary::-webkit-details-marker { display: none; }
 app-root .main-menu summary::after { content: " ▾"; }
 app-root .main-menu details[open] summary, app-root .main-menu summary:hover { background: var(--cassis-hover); }
-app-root .menu-options { position: absolute; z-index: 2; top: 100%; left: 0; min-width: 13rem; padding: 0 .35rem; background: white; border: 1px solid var(--cassis); border-radius: 8px; box-shadow: 0 5px 20px #1e3c5025; }
+app-root .menu-options { position: absolute; z-index: 2; top: 100%; left: 0; min-width: 13rem; padding: 0 .35rem; background: white; border: 1px solid var(--cassis-border); border-radius: 8px; box-shadow: 0 5px 20px #1e3c5025; }
 app-root .menu-options button { display: block; width: 100%; border: 0; border-radius: 5px; padding: 0 .75rem; background: var(--cassis); color: white; font: inherit; text-align: left; cursor: pointer; }
 app-root .menu-options button:hover:not(:disabled) { background: var(--cassis-hover); }
 app-root .menu-options button:disabled { color: #d7c8d2; opacity: 1; }

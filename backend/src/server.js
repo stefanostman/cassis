@@ -341,6 +341,69 @@ app.get('/api/cases/:id', async (request, response) => {
   response.json(row);
 });
 
+function conversationBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).some((key) => key !== 'body')) fail(400, 'Only body is allowed');
+  const value = text(body.body, 'body', 4000);
+  if (!value.trim()) fail(400, 'body must not be empty');
+  return value;
+}
+
+async function conversationPosts(connection, caseId, userId, postId) {
+  const [rows] = await connection.execute(
+    `SELECT p.id, p.caseId, COALESCE(u.username, p.authorName) AS authorName,
+       p.body, p.created, p.updated, COALESCE(p.authorId = ?, 0) AS isOwn
+     FROM case_conversation_posts p LEFT JOIN cassis_users u ON u.id = p.authorId
+     WHERE p.caseId = ?${postId ? ' AND p.id = ?' : ''}
+     ORDER BY p.created, p.id`,
+    postId ? [userId, caseId, postId] : [userId, caseId],
+  );
+  return rows.map((row) => ({ ...row, isOwn: Number(row.isOwn) === 1 }));
+}
+
+app.get('/api/cases/:id/conversation', async (request, response) => {
+  const caseId = id(request.params.id, 'case id');
+  await requireObject(pool, caseId, 'base_case');
+  response.json(await conversationPosts(pool, caseId, request.userId));
+});
+
+app.post('/api/cases/:id/conversation', authorize('case:update'), async (request, response) => {
+  const caseId = id(request.params.id, 'case id');
+  const body = conversationBody(request.body);
+  const postId = randomUUID();
+  const post = await transaction(async (connection) => {
+    await requireObject(connection, caseId, 'base_case', true);
+    await connection.execute(
+      `INSERT INTO case_conversation_posts (id, caseId, authorId, authorName, body, created, updated)
+       VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))`,
+      [postId, caseId, request.userId, request.username, body],
+    );
+    return (await conversationPosts(connection, caseId, request.userId, postId))[0];
+  });
+  response.status(201).json(post);
+});
+
+app.put('/api/cases/:id/conversation/:postId', authorize('case:update'), async (request, response) => {
+  const caseId = id(request.params.id, 'case id');
+  const postId = id(request.params.postId, 'post id');
+  const body = conversationBody(request.body);
+  const post = await transaction(async (connection) => {
+    await requireObject(connection, caseId, 'base_case', true);
+    const [rows] = await connection.execute(
+      'SELECT authorId FROM case_conversation_posts WHERE id = ? AND caseId = ? FOR UPDATE', [postId, caseId],
+    );
+    if (!rows.length) fail(404, 'Conversation post not found');
+    if (!rows[0].authorId || rows[0].authorId.toLowerCase() !== request.userId.toLowerCase()) {
+      fail(403, 'Only the author can edit a conversation post');
+    }
+    await connection.execute(
+      'UPDATE case_conversation_posts SET body = ?, updated = UTC_TIMESTAMP(3) WHERE id = ?', [body, postId],
+    );
+    return (await conversationPosts(connection, caseId, request.userId, postId))[0];
+  });
+  response.json(post);
+});
+
 app.post('/api/cases', authorize('case:create'), async (request, response) => {
   const data = caseInput(request.body);
   const objectId = randomUUID();

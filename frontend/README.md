@@ -6,6 +6,10 @@ This project was generated using [Angular CLI](https://github.com/angular/angula
 
 Se [backendens instruktioner](../backend/README.md) för databas, användare och API. Starta backend innan du loggar in.
 
+Sidans innehåll använder 98 procent av fönstrets bredd, med kolumner fördelade 15/70/15. Vänster sidoyta är reserverad för framtida metainformation och den högra visar det valda ärendets konversation; på smala skärmar visas sidoytorna under huvudinnehållet.
+
+Alla som kan läsa ärenden kan se konversationen. Användare med rätt att ändra ärenden kan skicka inlägg och redigera sina egna. Konversationen uppdateras automatiskt var tionde sekund medan ärendet är valt. Osända utkast bevaras vid byte av ärende under den aktuella sessionen, men inte om sidan laddas om. Inläggen tas bort när ärendet tas bort.
+
 Sökfältet visas direkt och nås även via **Sök → Fritext**. Klicka på ett diarienummer eller en handlings namn för att visa objektet. Ett ärendes handlingar sorteras efter created i stigande ordning och kan öppnas och stängas var för sig. Om ärendet bara har en handling öppnas den automatiskt; annars är raderna kollapsade. En handling som väljs i sökresultatet öppnas direkt. Fälten visas först i läsläge; välj **Ändra** för att redigera. Skapa ett ärende via **Skapa → Ärende**.
 
 Handlingar som är manuellt kopplade från det valda ärendet visas också, en gång per handling även om flera relationer finns. Fältet **Ärende** visar handlingens ursprungliga ärende. En administratör kan ta bort varje manuell koppling utan att ta bort handlingen. Om ärendet tas bort raderas bara handlingar som tillhör det; handlingar från andra ärenden finns kvar. Ärendet kan inte tas bort om någon av dess egna handlingar innehåller dokument.

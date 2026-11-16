@@ -305,7 +305,7 @@ paths:
     delete:
       tags: [Ärenden]
       summary: Ta bort ärende
-      description: Kräver `case:delete`. Ärendets handlingar och berörda relationer tas också bort, men borttagningen stoppas om en handling har dokument.
+      description: Kräver `case:delete`. Ärendets konversation, handlingar och berörda relationer tas också bort, men borttagningen stoppas om en handling har dokument.
       responses:
         '204':
           description: Ärendet har tagits bort
@@ -319,6 +319,85 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cases/{id}/conversation:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Ärenden]
+      summary: Läs ärendets konversation
+      responses:
+        '200':
+          description: Inlägg i kronologisk ordning
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConversationPost'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Ärenden]
+      summary: Skicka ett inlägg
+      description: Kräver `case:update`.
+      requestBody:
+        $ref: '#/components/requestBodies/ConversationInput'
+      responses:
+        '201':
+          description: Det skapade inlägget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationPost'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cases/{id}/conversation/{postId}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - in: path
+        name: postId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Uuid'
+    put:
+      tags: [Ärenden]
+      summary: Ändra eget inlägg
+      description: Kräver `case:update` och att användaren skrev inlägget.
+      requestBody:
+        $ref: '#/components/requestBodies/ConversationInput'
+      responses:
+        '200':
+          description: Det uppdaterade inlägget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationPost'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
   /records:
@@ -899,6 +978,12 @@ components:
       schema:
         $ref: '#/components/schemas/Uuid'
   requestBodies:
+    ConversationInput:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ConversationInput'
     CaseInput:
       required: true
       content:
@@ -966,6 +1051,37 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    ConversationInput:
+      type: object
+      required: [body]
+      additionalProperties: false
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: Måste innehålla minst ett tecken som inte är blanksteg.
+    ConversationPost:
+      type: object
+      required: [id, caseId, authorName, body, created, updated, isOwn]
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        caseId:
+          $ref: '#/components/schemas/Uuid'
+        authorName:
+          type: string
+        body:
+          type: string
+        created:
+          type: string
+          description: UTC-tid från MySQL.
+        updated:
+          type: string
+          description: UTC-tid från MySQL.
+        isOwn:
+          type: boolean
+          description: Om den inloggade användaren är författare.
     Uuid:
       type: string
       format: uuid

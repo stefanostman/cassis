@@ -36,6 +36,11 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     expect((fixture.nativeElement as HTMLElement).querySelector('h2')?.textContent).toContain('Logga in');
+    const heading = (fixture.nativeElement as HTMLElement).querySelector('h1')!;
+    expect(heading.getAttribute('aria-label')).toBe('Cassis');
+    expect(heading.querySelector('img')?.getAttribute('src')).toBe('cassis.svg');
+    const layout = (fixture.nativeElement as HTMLElement).querySelector('.page-layout')!;
+    expect([...layout.children].map((element) => element.tagName)).toEqual(['ASIDE', 'MAIN', 'ASIDE']);
   });
 
   it('shows an error when login fails', async () => {
@@ -69,6 +74,7 @@ describe('App', () => {
     let currentRecords = initialRecords.slice(0, singleRecord ? 1 : undefined).map((record) => ({ ...record }));
     let currentCase = { ...testCase };
     const documents: { objectId: string; recordId: string; name: string; documentType: string; filetype: string; filesize: number; filename: string; originalFilename: string | null }[] = [];
+    const conversationPosts: { id: string; caseId: string; authorName: string; body: string; created: string; updated: string; isOwn: boolean }[] = [];
     let users = [
       { id: 'user-1', username: 'test', roles: ['admin'] },
       { id: 'user-2', username: 'anna', roles: ['Handläggare'] },
@@ -80,6 +86,23 @@ describe('App', () => {
     ];
     let relations = initialRelations.map((relation) => ({ ...relation }));
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      const conversation = /^\/api\/cases\/([^/]+)\/conversation(?:\/([^/]+))?$/.exec(url);
+      if (conversation) {
+        const caseId = conversation[1];
+        if (options?.method === 'POST') {
+          const body = JSON.parse(String(options.body)).body;
+          const post = { id: `post-${conversationPosts.length + 1}`, caseId, authorName: 'test',
+            body, created: audit.created, updated: audit.created, isOwn: true };
+          conversationPosts.push(post);
+          return { ok: true, status: 201, json: async () => ({ ...post }) };
+        }
+        if (options?.method === 'PUT') {
+          const post = conversationPosts.find((item) => item.caseId === caseId && item.id === conversation[2])!;
+          post.body = JSON.parse(String(options.body)).body;
+          return { ok: true, status: 200, json: async () => ({ ...post }) };
+        }
+        return { ok: true, status: 200, json: async () => conversationPosts.filter((post) => post.caseId === caseId).map((post) => ({ ...post })) };
+      }
       if (url === '/api/documents') return { ok: true, status: 200, json: async () => [...documents] };
       if (url === '/api/records/record-1/documents' && options?.method === 'POST') {
         const body = options.body as FormData;
@@ -213,8 +236,104 @@ describe('App', () => {
       fixture.detectChanges();
       expect(element.querySelectorAll('tbody tr')).toHaveLength(2);
     });
-    return { fixture, element };
+    return { fixture, element, conversationPosts };
   }
+
+  it('creates and edits its own conversation posts and refreshes other posts', async () => {
+    const { fixture, element, conversationPosts } = await workspace();
+    const sidebar = element.querySelector<HTMLElement>('.conversation')!;
+    expect(sidebar.textContent).toContain('Välj ett ärende');
+    element.querySelector<HTMLButtonElement>('.result-link')!.click();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(sidebar.textContent).toContain('Skapa konversation');
+    });
+    [...sidebar.querySelectorAll('button')].find((button) => button.textContent?.includes('Skapa konversation'))!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const textarea = sidebar.querySelector<HTMLTextAreaElement>('textarea')!;
+    textarea.value = 'Första inlägget';
+    textarea.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    sidebar.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(sidebar.querySelector('.conversation-text')?.textContent).toContain('Första inlägget');
+      expect(sidebar.textContent).toContain('Nytt inlägg');
+    });
+    expect(sidebar.querySelector('.conversation-post-header')?.textContent).toContain('test');
+    expect(sidebar.querySelector('time')?.textContent).toMatch(/2026-01-02 \d\d:\d\d/);
+    sidebar.querySelector<HTMLButtonElement>('.conversation-post button')!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const edit = sidebar.querySelector<HTMLTextAreaElement>('textarea')!;
+    edit.value = 'Ändrat inlägg';
+    edit.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    sidebar.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(sidebar.querySelector('.conversation-text')?.textContent).toContain('Ändrat inlägg');
+    });
+    conversationPosts.push({ id: 'other-post', caseId: 'case-1', authorName: 'anna', body: 'Svar från annan',
+      created: audit.created, updated: audit.created, isOwn: false });
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(sidebar.textContent).toContain('Svar från annan');
+    }, { timeout: 12000 });
+    const otherPost = [...sidebar.querySelectorAll('.conversation-post')].find((post) => post.textContent?.includes('Svar från annan'))!;
+    expect(otherPost.querySelector('button')).toBeNull();
+  }, 15000);
+
+  it('allows read-only users to see posts but not write', async () => {
+    const { fixture, element, conversationPosts } = await workspace(false, false, records, [], undefined, ['read']);
+    conversationPosts.push({ id: 'other-post', caseId: 'case-1', authorName: 'anna', body: 'Meddelande',
+      created: audit.created, updated: audit.created, isOwn: false });
+    element.querySelector<HTMLButtonElement>('.result-link')!.click();
+    const sidebar = element.querySelector<HTMLElement>('.conversation')!;
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(sidebar.textContent).toContain('Meddelande');
+    });
+    expect(sidebar.querySelector('button')).toBeNull();
+    expect(sidebar.querySelector('textarea')).toBeNull();
+  });
+
+  it('keeps unsent drafts separate when switching cases', async () => {
+    const otherCase = { ...testCase, objectId: 'case-2', diaryNumber: 'D-2', caseSentence: 'Annat ärende' };
+    const otherRecords = [records[0], { ...records[1], caseId: 'case-2' }];
+    const { fixture, element, conversationPosts } = await workspace(false, false, otherRecords, [], undefined, allPermissions, [otherCase]);
+    conversationPosts.push({ id: 'case-1-post', caseId: 'case-1', authorName: 'anna', body: 'Endast första ärendet',
+      created: audit.created, updated: audit.created, isOwn: false });
+    const sidebar = element.querySelector<HTMLElement>('.conversation')!;
+    const links = [...element.querySelectorAll<HTMLButtonElement>('.result-link')];
+    links[0].click();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(sidebar.textContent).toContain('Endast första ärendet');
+    });
+    [...sidebar.querySelectorAll('button')].find((button) => button.textContent?.includes('Nytt inlägg'))!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const textarea = sidebar.querySelector<HTMLTextAreaElement>('textarea')!;
+    textarea.value = 'Utkast för första ärendet';
+    textarea.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    links[1].click();
+    fixture.detectChanges();
+    expect(sidebar.textContent).not.toContain('Endast första ärendet');
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(sidebar.textContent).toContain('Skapa konversation');
+    });
+    expect(sidebar.querySelector('textarea')).toBeNull();
+    links[0].click();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(sidebar.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Utkast för första ärendet');
+      expect(sidebar.textContent).toContain('Endast första ärendet');
+    });
+  });
 
   it('imports a document for the open record and shows its metadata', async () => {
     const { fixture, element } = await workspace(false, true, records, [{ listName: 'documentType', value: 'Avtal' }]);

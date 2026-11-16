@@ -19,6 +19,8 @@ npm run setup
 
 `setup` skapar tabeller som saknas och lägger till grundlistor och användarroller som saknas. Det är inte ett migrationsverktyg för framtida schemaändringar.
 
+För ärendekonversation i en befintlig databas: kör `npm run setup` i `backend` och starta om backend. Det skapar tabellen `case_conversation_posts` om den saknas.
+
 För dokumentimport i en befintlig databas: kör `npm install` och `npm run setup` i `backend`, och starta om backend. Kommandot skapar `base_document` och värdelistan `documentType` om de saknas och behåller befintliga listvärden.
 
 För en befintlig `base_document` utan kolumnen `originalFilename`: kör `npm run migrate-document-original-filename` i `backend` och starta om backend. Befintliga dokument får `NULL` eftersom deras originalnamn inte har sparats tidigare. Migreringen kan köras flera gånger.
@@ -62,6 +64,8 @@ Svaret innehåller `token`. Lägg den i Postmans **Authorization → Bearer Toke
 | PUT, DELETE | `/users/:id` | Ändra eller ta bort användare (kräver admin) |
 | GET, POST | `/cases` | Lista eller skapa ärenden |
 | GET, PUT, DELETE | `/cases/:objectId` | Läs, ersätt eller ta bort ett ärende |
+| GET, POST | `/cases/:objectId/conversation` | Läs konversationen eller skriv ett inlägg |
+| PUT | `/cases/:objectId/conversation/:postId` | Redigera ett eget inlägg |
 | GET, POST | `/records` | Lista eller skapa handlingar |
 | GET, PUT, DELETE | `/records/:objectId` | Läs, ersätt eller ta bort en handling |
 | GET | `/documents` | Lista dokumentens metadata |
@@ -79,6 +83,8 @@ Svaret innehåller `token`. Lägg den i Postmans **Authorization → Bearer Toke
 | GET | `/search?q=söktext` | Sök i ärenden, handlingar och dokumentens metadata |
 
 Sökträffar innehåller `objectId`, `objectType`, `label`, `created`, `createdBy`, `diaryNumber`, `caseSentence`, `name`, `recordType`, `recordId`, `documentType`, `filetype`, `filesize`, `filename` och `originalFilename`. Fält som inte gäller för objekttypen är `null`. Sökningen omfattar dokumentens metadata och standardfält, men inte filernas innehåll.
+
+Alla med läsbehörighet kan läsa ett ärendes konversation. Rättigheten `case:update` krävs för att skriva och redigera; endast författaren kan ändra sitt inlägg. Varje inlägg får innehålla högst 4 000 tecken. Inläggen tas bort tillsammans med ärendet. Om en användare tas bort bevaras inläggen med namnet som gällde när de skrevs, men kan inte längre redigeras.
 
 Exempel på JSON för `POST` och `PUT`:
 

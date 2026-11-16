@@ -1,5 +1,5 @@
-import { afterNextRender, Component, computed, HostListener, signal } from '@angular/core';
-import { NgTemplateOutlet } from '@angular/common';
+import { afterNextRender, Component, computed, effect, HostListener, signal, untracked } from '@angular/core';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 interface BaseObject {
@@ -62,6 +62,23 @@ interface SearchResult {
   originalFilename: string | null;
 }
 
+interface ConversationPost {
+  id: string;
+  caseId: string;
+  authorName: string;
+  body: string;
+  created: string;
+  updated: string;
+  isOwn: boolean;
+}
+
+interface ConversationDraft {
+  composing: boolean;
+  newText: string;
+  editingId: string;
+  editingText: string;
+}
+
 interface LoginResponse {
   token: string;
   username: string;
@@ -111,7 +128,7 @@ type Menu = 'search' | 'create' | 'admin';
 type AdminPanel = 'users' | 'relations' | 'valueLists' | null;
 
 @Component({
-  imports: [FormsModule, NgTemplateOutlet],
+  imports: [DatePipe, FormsModule, NgTemplateOutlet],
   selector: 'app-root',
   styleUrl: './app.css',
   templateUrl: './app.html',
@@ -138,8 +155,15 @@ export class App {
   protected readonly results = signal<SearchResult[]>([]);
   protected readonly searched = signal(false);
   protected readonly selectedCaseId = signal('');
+  protected readonly conversationPosts = signal<ConversationPost[]>([]);
+  protected readonly conversationLoading = signal(false);
+  protected readonly conversationLoaded = signal(false);
+  protected readonly conversationSaving = signal(false);
+  protected readonly conversationError = signal('');
   protected readonly openRecordIds = signal<Set<string>>(new Set());
   protected readonly selectedCase = computed(() => this.cases().find((item) => item.objectId === this.selectedCaseId()));
+  private readonly conversationCaseId = computed(() => this.selectedCase()?.objectId ?? '');
+  protected readonly conversationForCaseId = signal('');
   protected readonly caseRecords = computed(() => {
     const caseId = this.selectedCaseId();
     if (!caseId) return [];
@@ -182,8 +206,28 @@ export class App {
   protected adminPanel: AdminPanel = null;
   private lastSearchQuery = '';
   private token = '';
+  private conversationRequest = 0;
+  private readonly conversationDrafts = new Map<string, ConversationDraft>();
 
   constructor() {
+    effect((onCleanup) => {
+      const caseId = this.conversationCaseId();
+      const username = this.username();
+      untracked(() => {
+        this.conversationRequest++;
+        this.conversationForCaseId.set(caseId);
+        this.conversationPosts.set([]);
+        this.conversationError.set('');
+        this.conversationLoading.set(false);
+        this.conversationLoaded.set(false);
+        if (!caseId || !username) return;
+        void this.loadConversation(caseId);
+        const timer = setInterval(() => {
+          if (!this.conversationSaving()) void this.loadConversation(caseId);
+        }, 10000);
+        onCleanup(() => clearInterval(timer));
+      });
+    });
     afterNextRender(() => {
       this.token = sessionStorage.getItem('cassisToken') || '';
       this.username.set(sessionStorage.getItem('cassisUsername') || '');
@@ -306,7 +350,8 @@ export class App {
   }
 
   protected async logout(): Promise<void> {
-    if ((this.editing || this.userDraftChanged || this.relationDraftChanged || this.valueListDraftChanged)
+    if ((this.editing || this.userDraftChanged || this.relationDraftChanged || this.valueListDraftChanged
+      || [...this.conversationDrafts.values()].some((draft) => draft.newText.trim() || draft.editingId))
       && !confirm('Logga ut och kasta osparade ändringar?')) return;
     await this.run(async () => {
       await this.request<void>('/auth/logout', 'POST');
@@ -337,6 +382,10 @@ export class App {
     this.results.set([]);
     this.searched.set(false);
     this.selectedCaseId.set('');
+    this.conversationRequest++;
+    this.conversationDrafts.clear();
+    this.conversationPosts.set([]);
+    this.conversationError.set('');
     this.openRecordIds.set(new Set());
     this.caseMode = 'view';
     this.recordMode = 'view';
@@ -415,6 +464,79 @@ export class App {
 
   protected can(permission: string): boolean {
     return this.permissions().includes(permission);
+  }
+
+  protected get conversationDraft(): ConversationDraft {
+    const caseId = this.selectedCaseId();
+    let draft = this.conversationDrafts.get(caseId);
+    if (!draft) {
+      draft = { composing: false, newText: '', editingId: '', editingText: '' };
+      this.conversationDrafts.set(caseId, draft);
+    }
+    return draft;
+  }
+
+  protected async loadConversation(caseId = this.selectedCaseId()): Promise<void> {
+    if (!caseId || this.conversationSaving() || this.conversationLoading()) return;
+    const requestId = ++this.conversationRequest;
+    this.conversationLoading.set(true);
+    try {
+      const posts = await this.request<ConversationPost[]>(`/cases/${encodeURIComponent(caseId)}/conversation`);
+      if (requestId === this.conversationRequest && caseId === this.selectedCaseId()) {
+        this.conversationPosts.set(posts);
+        this.conversationLoaded.set(true);
+        this.conversationError.set('');
+      }
+    } catch (error) {
+      if (requestId === this.conversationRequest && caseId === this.selectedCaseId()) {
+        console.error('Could not load conversation:', error);
+        this.conversationError.set(error instanceof Error ? error.message : 'Kunde inte läsa konversationen.');
+      }
+    } finally {
+      if (requestId === this.conversationRequest) this.conversationLoading.set(false);
+    }
+  }
+
+  protected editConversationPost(post: ConversationPost): void {
+    if (!post.isOwn || !this.can('case:update')) return;
+    const draft = this.conversationDraft;
+    if (draft.editingId && draft.editingId !== post.id && draft.editingText.trim()
+        && !confirm('Kasta osparade ändringar i inlägget?')) return;
+    draft.editingId = post.id;
+    draft.editingText = post.body;
+  }
+
+  protected async saveConversationPost(editing: boolean): Promise<void> {
+    const caseId = this.selectedCaseId();
+    const draft = this.conversationDraft;
+    const body = editing ? draft.editingText : draft.newText;
+    const postId = draft.editingId;
+    if (!caseId || !body.trim() || (editing && !postId) || this.conversationSaving() || !this.can('case:update')) return;
+    this.conversationRequest++;
+    this.conversationLoading.set(false);
+    this.conversationSaving.set(true);
+    this.conversationError.set('');
+    let saved = false;
+    try {
+      const path = `/cases/${encodeURIComponent(caseId)}/conversation${editing ? `/${encodeURIComponent(postId)}` : ''}`;
+      await this.request<ConversationPost>(path, editing ? 'PUT' : 'POST', { body });
+      saved = true;
+      if (editing) {
+        draft.editingId = '';
+        draft.editingText = '';
+      } else {
+        draft.composing = false;
+        draft.newText = '';
+      }
+    } catch (error) {
+      console.error('Could not save conversation post:', error);
+      if (caseId === this.selectedCaseId()) {
+        this.conversationError.set(error instanceof Error ? error.message : 'Kunde inte spara inlägget.');
+      }
+    } finally {
+      this.conversationSaving.set(false);
+      if (saved || caseId !== this.selectedCaseId()) await this.loadConversation();
+    }
   }
 
   protected toggleUserRole(role: string, selected: boolean): void {
@@ -694,6 +816,7 @@ export class App {
     if (!confirm('Ta bort ärendet och de handlingar som tillhör det? Manuellt kopplade handlingar från andra ärenden tas inte bort.')) return;
     await this.run(async () => {
       await this.request(`/cases/${item.objectId}`, 'DELETE');
+      this.conversationDrafts.delete(item.objectId);
       this.selectedCaseId.set('');
       this.openRecordIds.set(new Set());
       await this.refresh();

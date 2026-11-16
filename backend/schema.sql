@@ -68,6 +68,19 @@ CREATE TABLE IF NOT EXISTS case_extraclass (
   FOREIGN KEY (caseId) REFERENCES base_case(objectId) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS case_conversation_posts (
+  id CHAR(36) PRIMARY KEY,
+  caseId CHAR(36) NOT NULL,
+  authorId CHAR(36) NULL,
+  authorName VARCHAR(50) NOT NULL,
+  body TEXT CHARACTER SET utf8mb4 NOT NULL,
+  created DATETIME(3) NOT NULL,
+  updated DATETIME(3) NOT NULL,
+  INDEX (caseId, created, id),
+  FOREIGN KEY (caseId) REFERENCES base_case(objectId) ON DELETE CASCADE,
+  FOREIGN KEY (authorId) REFERENCES cassis_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS base_record (
   objectId CHAR(36) PRIMARY KEY,
   name VARCHAR(50) NOT NULL,

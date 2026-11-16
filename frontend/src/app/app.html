@@ -1,8 +1,9 @@
-<main class="shell">
+<div class="page-layout">
+  <aside class="metadata-sidebar" aria-label="Vänster metadatasektion"></aside>
+  <main class="shell">
   <header class="topbar">
     <div>
-      <p class="eyebrow">Ärendehantering</p>
-      <h1>Cassis</h1>
+      <h1 aria-label="Cassis"><img src="cassis.svg" alt="" class="logo-icon">assis</h1>
     </div>
     @if (username()) {
       <div class="account">
@@ -168,7 +169,7 @@
 
     <section class="panel search-panel" aria-labelledby="search-title">
       <div class="panel-heading">
-        <div><p class="eyebrow">01 / Sök</p><h2 id="search-title">Sök i Cassis</h2></div>
+        <div><h2 id="search-title">Sök i Cassis</h2></div>
         @if (searched()) { <span class="count">{{ results().length }} träffar</span> }
       </div>
       <form class="search-form" (ngSubmit)="search()">
@@ -222,7 +223,7 @@
 
     <section class="panel" aria-labelledby="case-title">
       <div class="panel-heading">
-        <div><p class="eyebrow">02 / base_case</p><h2 #caseTitle id="case-title" tabindex="-1">Ärende</h2></div>
+        <div><h2 #caseTitle id="case-title" tabindex="-1">Ärende</h2></div>
         @if (caseMode === 'view') {
           <div class="actions">
             @if (selectedCase(); as item) {
@@ -292,7 +293,7 @@
 
     <section class="panel" aria-labelledby="record-title">
       <div class="panel-heading">
-        <div><p class="eyebrow">03 / base_record</p><h2 id="record-title">Handling</h2></div>
+        <div><h2 id="record-title">Handling</h2></div>
         @if (recordMode === 'view' && can('record:create')) {
           <div class="actions">
             <button class="button button-primary" type="button" (click)="newRecord()" [disabled]="busy() || editing || !selectedCase()">Ny handling</button>
@@ -453,4 +454,64 @@
       }
     </section>
   }
-</main>
+  </main>
+  <aside class="metadata-sidebar conversation" aria-labelledby="conversation-title">
+    <h2 id="conversation-title">Ärendekonversation</h2>
+    @if (!username()) {
+      <p class="conversation-hint">Logga in för att se konversationen.</p>
+    } @else if (!selectedCase()) {
+      <p class="conversation-hint">Välj ett ärende för att se konversationen.</p>
+    } @else if (conversationForCaseId() !== selectedCaseId()) {
+      <p class="conversation-hint" role="status">Laddar konversationen…</p>
+    } @else {
+      @if (conversationError()) {
+        <p class="conversation-error" role="alert">{{ conversationError() }}</p>
+        <button class="button" type="button" (click)="loadConversation()" [disabled]="conversationLoading() || conversationSaving()">Försök igen</button>
+      }
+      @if (conversationLoading() && !conversationLoaded() && !conversationDraft.composing) {
+        <p class="conversation-hint" role="status">Laddar konversationen…</p>
+      } @else if (!conversationError() || conversationPosts().length || conversationDraft.composing) {
+        <div class="conversation-posts">
+          @for (post of conversationPosts(); track post.id) {
+            <article class="conversation-post">
+              <header class="conversation-post-header">
+                <strong>{{ post.authorName }}</strong>
+                <time>{{ (post.created.replace(' ', 'T') + 'Z') | date:'yyyy-MM-dd HH:mm' }}</time>
+              </header>
+              @if (conversationDraft.editingId === post.id) {
+                <form (ngSubmit)="saveConversationPost(true)">
+                  <textarea name="editPost" [(ngModel)]="conversationDraft.editingText" maxlength="4000" aria-label="Redigera inlägg" [disabled]="conversationSaving()" required></textarea>
+                  <div class="conversation-actions">
+                    <button class="button" type="submit" [disabled]="conversationSaving() || !conversationDraft.editingText.trim()">Spara</button>
+                    <button class="button" type="button" (click)="conversationDraft.editingId = ''; conversationDraft.editingText = ''" [disabled]="conversationSaving()">Avbryt</button>
+                  </div>
+                </form>
+              } @else {
+                <p class="conversation-text">{{ post.body }}</p>
+                @if (post.isOwn && can('case:update')) {
+                  <button class="button" type="button" (click)="editConversationPost(post)" [disabled]="conversationSaving()">Redigera</button>
+                }
+              }
+            </article>
+          }
+        </div>
+        @if (can('case:update')) {
+          @if (conversationDraft.composing) {
+            <form class="conversation-post" (ngSubmit)="saveConversationPost(false)">
+              <header class="conversation-post-header"><strong>{{ username() }}</strong></header>
+              <textarea name="newPost" [(ngModel)]="conversationDraft.newText" maxlength="4000" aria-label="Nytt inlägg" [disabled]="conversationSaving()" required></textarea>
+              <div class="conversation-actions">
+                <button class="button" type="submit" [disabled]="conversationSaving() || !conversationDraft.newText.trim()">Skicka</button>
+                <button class="button" type="button" (click)="conversationDraft.composing = false" [disabled]="conversationSaving()">Avbryt</button>
+              </div>
+            </form>
+          } @else {
+            <button class="button" type="button" (click)="conversationDraft.composing = true" [disabled]="conversationSaving()">{{ conversationPosts().length ? 'Nytt inlägg' : 'Skapa konversation' }}</button>
+          }
+        } @else if (!conversationPosts().length) {
+          <p class="conversation-hint">Inga inlägg ännu.</p>
+        }
+      }
+    }
+  </aside>
+</div>
